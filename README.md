@@ -179,14 +179,32 @@ RTM, et à Baptiste RUELLO-BABALONI pour l'API mobilité.
 
 ### Proxmox, en une commande
 
-Depuis le shell de l'hôte Proxmox :
+Depuis le shell de l'hôte Proxmox, au choix :
 
 ```bash
+# LXC + service systemd — le plus léger
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/GaspardMenou/rtmpix/main/proxmox/install.sh)"
+
+# LXC + Docker — si tu gères déjà tes services en conteneurs
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/GaspardMenou/rtmpix/main/proxmox/install-docker.sh)"
 ```
 
-Le script crée un LXC Debian non privilégié (1 vCPU, 512 Mo, 4 Go), installe rtmpix,
-compile le GTFS et enregistre le service systemd. Réglable par variables d'environnement :
+**Une précision à contre-courant de l'intuition sur la seconde variante** : faire tourner
+Docker dans un LXC impose `nesting=1`, qui *assouplit* le profil AppArmor du conteneur. On
+ajoute une couche d'isolation tout en desserrant celle du dessous — le résultat net vaut à
+peu près un LXC non privilégié sans nesting. Le gain réel de Docker ici est la
+reproductibilité et la simplicité de mise à jour, ce qui reste une bonne raison ; ce n'est
+simplement pas un gain de cloisonnement.
+
+Le script garde le conteneur **non privilégié** et ne touche pas à AppArmor : `keyctl=1`
+suffit à faire tourner Docker sans cela. Beaucoup de tutoriels recommandent
+`lxc.apparmor.profile: unconfined` — c'est inutile ici et cela supprimerait pour de bon
+l'isolation recherchée. Le script vérifie aussi le pilote de stockage retenu : un `vfs`
+signalerait qu'`overlay2` est refusé, et donc un Docker lent et gourmand en disque.
+
+Le premier script crée un LXC Debian non privilégié (1 vCPU, 512 Mo, 4 Go), installe
+rtmpix, compile le GTFS et enregistre le service systemd. Réglable par variables
+d'environnement :
 
 ```bash
 CTID=210 RAM=1024 STORAGE=local-lvm bash -c "$(curl -fsSL .../install.sh)"
