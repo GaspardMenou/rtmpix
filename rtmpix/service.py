@@ -11,12 +11,15 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
+from . import destinations as destinations_store
 from . import gtfs, planner, render
 from . import stations as stations_mod
 from .awtrix import Awtrix
 from .calibration import Calibration
+from .config import Destination
 from .departures import build_boards
 from .disruptions import DisruptionClient, relevant
+from .geocode import Geocoder
 from .realtime import PARIS, RealtimeService, route_types_by_line
 from .reliability import Punctuality
 from .routing import WalkRouter
@@ -36,6 +39,9 @@ class JourneyState:
     course: Course | None = None
     plans: list = field(default_factory=list)
     now_plans: list = field(default_factory=list)
+    status: str = "ready"     # ready | discovering | empty | error
+    error: str = ""
+    editable: bool = False    # ajoutée depuis le dashboard, donc supprimable depuis lui
 
     @property
     def best(self):
@@ -58,6 +64,7 @@ class Service:
         self.router = WalkRouter(cfg, cfg.routing_cache_path)
         self.realtime = RealtimeService(cfg, self.conn)
         self.punctuality = Punctuality(cfg.punctuality_path, cfg)
+        self.geocoder = Geocoder(cfg, cfg.geocode_cache_path)
         self.route_types = route_types_by_line(self.conn)
         self.velo_client = VeloClient(cfg) if cfg.velo.enabled else None
         self.disruption_client = DisruptionClient(cfg) if cfg.disruptions.enabled else None
@@ -130,37 +137,123 @@ class Service:
 
     # ----------------------------------------------------------------- trajets
 
-    def setup_journeys(self) -> None:
-        """Découvre les itinéraires vers chaque destination. Coûteux : fait au démarrage."""
-        if not self.cfg.journeys.enabled:
-            self.journeys = []
-            return
+    def all_destinations(self) -> list:
+        """Celles de la configuration, plus celles ajoutées depuis le dashboard."""
+        return destinations_store.merge(
+            self.cfg.journeys.destinations,
+            destinations_store.load(self.cfg.destinations_path),
+        )
 
-        origin = {"lat": self.cfg.home.lat, "lon": self.cfg.home.lon}
-        found: list[JourneyState] = []
-        for destination in self.cfg.journeys.destinations:
+    def _make_schedule(self, destination) -> ScheduleClient | None:
+        if not destination.calendar:
+            return None
+        cache = self.cfg.gtfs.data_dir / f"ical-{render.slug(destination.name, 12)}.ics"
+        return ScheduleClient(
+            destination.calendar, cache,
+            timeout_s=self.cfg.sources.timeout_s,
+            user_agent=self.cfg.sources.user_agent,
+        )
+
+    def _discover_into(self, state: JourneyState) -> None:
+        """Remplit un trajet de ses itinéraires. Long : appelé en arrière-plan à l'ajout."""
+        destination = state.destination
+        try:
             log.info("Itinéraires vers %s :", destination.name)
             patterns = planner.discover(
                 self.conn,
                 self.cfg,
                 self.router,
-                origin,
+                {"lat": self.cfg.home.lat, "lon": self.cfg.home.lon},
                 {"lat": destination.lat, "lon": destination.lon, "radius_m": destination.radius_m},
                 self.calibration,
             )
-            schedule = None
-            if destination.calendar:
-                cache = self.cfg.gtfs.data_dir / f"ical-{render.slug(destination.name, 12)}.ics"
-                schedule = ScheduleClient(
-                    destination.calendar, cache,
-                    timeout_s=self.cfg.sources.timeout_s,
-                    user_agent=self.cfg.sources.user_agent,
-                )
-                schedule.refresh()
-            found.append(JourneyState(destination=destination, patterns=patterns, schedule=schedule))
+            if state.schedule is not None:
+                state.schedule.refresh()
+        except Exception as exc:
+            log.exception("Découverte impossible vers %s", destination.name)
+            with self.lock:
+                state.status = "error"
+                state.error = str(exc)
+            return
+
+        with self.lock:
+            state.patterns = patterns
+            state.status = "ready" if patterns else "empty"
+            state.error = ""
+        self.refresh_journeys()
+
+    def setup_journeys(self) -> None:
+        """Découvre les itinéraires vers chaque destination. Coûteux : fait au démarrage."""
+        if not self.cfg.journeys.enabled:
+            with self.lock:
+                self.journeys = []
+            return
+
+        config_names = {d.name.casefold() for d in self.cfg.journeys.destinations}
+        found: list[JourneyState] = []
+        for destination in self.all_destinations():
+            state = JourneyState(
+                destination=destination,
+                schedule=self._make_schedule(destination),
+                editable=destination.name.casefold() not in config_names,
+            )
+            self._discover_into(state)
+            found.append(state)
 
         with self.lock:
             self.journeys = found
+
+    def add_destination(self, name: str, lat: float, lon: float,
+                        calendar: str = "", location_filter: str = "") -> str:
+        """Ajoute une destination et lance sa découverte en tâche de fond.
+
+        La découverte interroge le routeur piéton : elle peut prendre une dizaine de
+        secondes, bien trop pour une requête HTTP. Le trajet apparaît donc aussitôt avec
+        l'état « en cours », et se remplit tout seul au rafraîchissement suivant.
+        """
+        name = (name or "").strip()
+        if not name:
+            return "Le nom est obligatoire."
+
+        existing = self.all_destinations()
+        if any(d.name.casefold() == name.casefold() for d in existing):
+            return f"« {name} » existe déjà."
+
+        destination = Destination(
+            name=name, lat=float(lat), lon=float(lon),
+            calendar=(calendar or "").strip(),
+            location_filter=(location_filter or "").strip(),
+        )
+        stored = destinations_store.load(self.cfg.destinations_path)
+        stored.append(destination)
+        destinations_store.save(self.cfg.destinations_path, stored)
+
+        state = JourneyState(
+            destination=destination,
+            schedule=self._make_schedule(destination),
+            status="discovering",
+            editable=True,
+        )
+        with self.lock:
+            self.journeys.append(state)
+        threading.Thread(
+            target=self._discover_into, args=(state,), name=f"discover-{name}", daemon=True
+        ).start()
+        return ""
+
+    def remove_destination(self, name: str) -> str:
+        stored = destinations_store.load(self.cfg.destinations_path)
+        kept = [d for d in stored if d.name.casefold() != (name or "").casefold()]
+        if len(kept) == len(stored):
+            # Celles qui viennent du YAML se retirent dans le YAML : le dashboard ne le
+            # réécrit jamais, et prétendre le contraire créerait une suppression fantôme.
+            return "Cette destination vient de config.yaml : retire-la là-bas."
+        destinations_store.save(self.cfg.destinations_path, kept)
+        with self.lock:
+            self.journeys = [
+                j for j in self.journeys if j.destination.name.casefold() != name.casefold()
+            ]
+        return ""
 
     def refresh_schedules(self) -> None:
         for journey in self.journeys:
@@ -396,6 +489,11 @@ class Service:
         screen = render.deadline_screen(journey, now)
         return {
             "name": journey.destination.name,
+            "lat": journey.destination.lat,
+            "lon": journey.destination.lon,
+            "status": journey.status,
+            "error": journey.error,
+            "editable": journey.editable,
             "has_calendar": journey.schedule is not None,
             "course": (
                 {
@@ -468,8 +566,32 @@ class Service:
                 }
                 for plan in journey.plans[: self.cfg.journeys.max_options]
             ],
+            # Tous les itinéraires découverts, détaillés : c'est le catalogue des
+            # possibilités, indépendamment de l'heure. Les horaires viennent d'`options`
+            # et de `fastest_now`, qui portent sur les mêmes itinéraires.
             "patterns": [
-                {"label": p.label, "describe": p.describe(), "total_s": p.total_s}
+                {
+                    "label": p.label,
+                    "describe": p.describe(),
+                    "total_s": p.total_s,
+                    "walk_in_s": p.walk_in_s,
+                    "walk_out_s": p.walk_out_s,
+                    "transfers_s": p.transfers_s,
+                    "legs": [
+                        {
+                            "line": leg.line,
+                            "color": leg.color,
+                            "from": leg.from_name,
+                            "to": leg.to_name,
+                            "ride_s": leg.typical_s,
+                            "runs": leg.daily_runs,
+                            "mode": {0: "tram", 1: "métro", 2: "train", 3: "bus", 4: "bateau"}.get(
+                                leg.route_type, "?"
+                            ),
+                        }
+                        for leg in p.legs
+                    ],
+                }
                 for p in journey.patterns
             ],
         }

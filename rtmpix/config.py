@@ -217,6 +217,14 @@ class Config:
     def punctuality_path(self) -> Path:
         return self.gtfs.data_dir / "punctuality.sqlite"
 
+    @property
+    def destinations_path(self) -> Path:
+        return self.gtfs.data_dir / "destinations.json"
+
+    @property
+    def geocode_cache_path(self) -> Path:
+        return self.gtfs.data_dir / "geocode-cache.json"
+
 
 def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
     value = raw.get(key) or {}

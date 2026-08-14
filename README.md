@@ -260,11 +260,36 @@ Python 3.11 ou plus récent.
 
 ## Dashboard
 
-`http://<ip-du-lxc>:8723` — il sert à trois choses :
+`http://<ip-du-lxc>:8723` — il sert à quatre choses :
 
+- **gérer les trajets** : ajouter une destination en la cherchant par son nom, voir tous
+  les itinéraires trouvés, en retirer ;
 - **voir** ce que l'horloge affiche, en simulation 32×8 ;
-- **chronométrer** les temps d'accès aux quais, station par station ;
+- **chronométrer** les temps d'accès aux quais et de correspondance, station par station ;
 - **régler** l'allure de marche par rapport à celle du routeur.
+
+### Ajouter un trajet
+
+Deux points suffisent, et le second se cherche par son nom plutôt qu'en coordonnées —
+quelques centaines de mètres d'écart changent l'arrêt le plus proche, donc les itinéraires.
+La recherche passe par Nominatim (OpenStreetMap), déclenchée à la main et mise en cache.
+
+L'ajout répond immédiatement, avec la mention « recherche des itinéraires… » : la découverte
+interroge le routeur piéton et prend une dizaine de secondes, bien trop pour une requête
+HTTP. Elle tourne en tâche de fond et le trajet se remplit tout seul.
+
+Chaque trajet affiche ensuite **tous** ses itinéraires — pas seulement le meilleur — avec
+les lignes, les arrêts, les correspondances et la durée porte à porte :
+
+```
+M1 › B3    8′ à pied · Cinq Avenues → La Rose · corresp. 2′ · Métro La Rose → Technopôle Centrale Med · 2′ à pied   25′ · pars 07:21 · arrivée 19:56
+M1 › 142   …                                                                                                        28′
+T2 › M1    …                                                                                                        15′
+```
+
+Les destinations ajoutées ici vivent dans `data/destinations.json` et se suppriment depuis
+le dashboard ; celles de `config.yaml` s'y modifient, le dashboard ne réécrit jamais ton
+YAML.
 
 Les valeurs mesurées vont dans `data/calibration.json` et priment sur `config.yaml`, qui
 n'est jamais réécrit. Le dashboard n'a **pas d'authentification** : à garder sur le réseau

@@ -316,6 +316,41 @@ def test_hhmm_garde_le_passe_proche():
     assert result.day == 17
 
 
+# ------------------------------------------------------------- destinations
+
+def test_destinations_aller_retour_disque(tmp_path):
+    from rtmpix.config import Destination
+    from rtmpix.destinations import load, save
+
+    path = tmp_path / "destinations.json"
+    save(path, [Destination(name="Centrale", lat=43.34, lon=5.43, calendar="x.ics")])
+    again = load(path)
+    assert len(again) == 1
+    assert again[0].name == "Centrale" and again[0].calendar == "x.ics"
+
+
+def test_destinations_config_prime_sur_le_fichier():
+    from rtmpix.config import Destination
+    from rtmpix.destinations import merge
+
+    from_config = [Destination(name="Centrale", lat=1, lon=2)]
+    from_file = [
+        Destination(name="centrale", lat=9, lon=9),   # même nom : la config l'emporte
+        Destination(name="Fac", lat=3, lon=4),
+    ]
+    merged = merge(from_config, from_file)
+    assert [d.name for d in merged] == ["Centrale", "Fac"]
+    assert merged[0].lat == 1
+
+
+def test_destinations_ignore_les_entrees_invalides(tmp_path):
+    from rtmpix.destinations import load
+
+    path = tmp_path / "destinations.json"
+    path.write_text('[{"name": "Bonne", "lat": 43.3, "lon": 5.4}, {"name": "Sans coordonnées"}]')
+    assert [d.name for d in load(path)] == ["Bonne"]
+
+
 # --------------------------------------------------------------------- iCal
 
 def test_as_datetime_journee_entiere():

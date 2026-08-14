@@ -47,6 +47,40 @@ def create_app(service) -> Flask:
 
         return jsonify(service.snapshot())
 
+    @app.get("/api/geocode")
+    def geocode():
+        """Cherche un lieu par son nom : saisir des coordonnées à la main est ingrat."""
+        places = service.geocoder.search(request.args.get("q", ""), limit=5)
+        return jsonify([{"label": p.label, "lat": p.lat, "lon": p.lon} for p in places])
+
+    @app.post("/api/destinations")
+    def add_destination():
+        payload = request.get_json(silent=True) or {}
+        try:
+            lat = float(payload.get("lat"))
+            lon = float(payload.get("lon"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Coordonnées invalides."}), 400
+
+        error = service.add_destination(
+            name=payload.get("name", ""),
+            lat=lat,
+            lon=lon,
+            calendar=payload.get("calendar", ""),
+            location_filter=payload.get("location_filter", ""),
+        )
+        if error:
+            return jsonify({"error": error}), 400
+        # La découverte tourne en tâche de fond : l'état revient avec « en cours ».
+        return jsonify(service.snapshot())
+
+    @app.delete("/api/destinations/<name>")
+    def remove_destination(name):
+        error = service.remove_destination(name)
+        if error:
+            return jsonify({"error": error}), 400
+        return jsonify(service.snapshot())
+
     @app.post("/api/reroute")
     def reroute():
         """Recalcule tous les trajets piétons en ignorant le cache."""

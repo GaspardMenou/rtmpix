@@ -116,6 +116,56 @@
   .eink-link { margin-left: auto; font-size: 13px; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+
+  /* Catalogue des itinéraires : toutes les combinaisons de lignes trouvées. */
+  .routes { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .routes h3 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .route {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  }
+  .route:nth-child(odd) { background: var(--panel-2); }
+  .route.best { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .route .chain { display: flex; align-items: center; gap: 6px; }
+  .route .arrow { color: var(--muted); }
+  .route .path { color: var(--muted); font-size: 12px; flex: 1; min-width: 200px; }
+  .route .dur { font-family: var(--mono); margin-left: auto; white-space: nowrap; }
+  .route .dur b { color: var(--text); }
+  .badge-sm {
+    font-family: var(--mono); font-weight: 700; font-size: 11px; color: #000;
+    padding: 2px 6px; border-radius: 4px; min-width: 26px; text-align: center;
+  }
+
+  /* Ajout d'une destination. */
+  .add-form { background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 16px 18px; }
+  .add-form .fields { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .add-form label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .add-form input[type=text] {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 7px; padding: 8px 11px; font-size: 14px; min-width: 200px;
+  }
+  .add-form input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .results { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .result {
+    padding: 8px 11px; border-radius: 7px; cursor: pointer; font-size: 13px;
+    background: var(--panel-2); border: 1px solid transparent;
+  }
+  .result:hover { border-color: var(--accent); }
+  .result.picked { border-color: var(--accent); color: var(--accent); }
+  .msg { font-size: 13px; margin-top: 10px; }
+  .msg.err { color: var(--now); }
+  .msg.ok { color: var(--calm); }
+  .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px; font-family: var(--mono);
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .tag.busy { color: var(--soon); border-color: color-mix(in srgb, var(--soon) 40%, var(--line)); }
+  .tag.bad { color: var(--now); border-color: color-mix(in srgb, var(--now) 40%, var(--line)); }
+  .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; }
+  .del:hover { color: var(--now); }
 </style>
 </head>
 <body>
@@ -131,7 +181,30 @@
     </div>
   </header>
 
+  <h2>Trajets</h2>
   <div id="journeys"></div>
+
+  <div class="add-form">
+    <div class="fields">
+      <div>
+        <label for="dest-q">Nouvelle destination</label>
+        <input type="text" id="dest-q" placeholder="École Centrale Méditerranée, Marseille"
+               autocomplete="off">
+      </div>
+      <div>
+        <label for="dest-name">Nom court (affiché)</label>
+        <input type="text" id="dest-name" placeholder="Centrale" autocomplete="off">
+      </div>
+      <div>
+        <label for="dest-cal">Agenda iCal (facultatif)</label>
+        <input type="text" id="dest-cal" placeholder="https://…/edt.ics" autocomplete="off">
+      </div>
+      <button id="dest-search">Chercher</button>
+      <button id="dest-add" disabled>Ajouter</button>
+    </div>
+    <div class="results" id="dest-results"></div>
+    <div class="msg" id="dest-msg"></div>
+  </div>
 
   <h2>Ce que montre l'horloge</h2>
   <div class="screens" id="screens"></div>
@@ -216,11 +289,48 @@ function render() {
   $("journeys").innerHTML = (state.journeys || []).map(j => {
     const dl = j.deadline;
     const opt = (j.options || [])[0];
+    const statusTag = {
+      discovering: '<span class="tag busy">recherche des itinéraires…</span>',
+      empty: '<span class="tag bad">aucun itinéraire trouvé</span>',
+      error: `<span class="tag bad">erreur : ${j.error || "?"}</span>`,
+    }[j.status] || "";
+
     let head = `<div class="journey-head">
         <span class="dest">${j.name}</span>
+        ${statusTag}
         ${j.course ? `<span class="course">${j.course.summary} · ${j.course.start}${j.course.location ? " · " + j.course.location : ""}</span>` : '<span class="course">aucun cours à venir</span>'}
         <a class="eink-link" href="/eink.png" target="_blank">aperçu e-ink ↗</a>
+        ${j.editable ? `<button class="del" data-remove="${j.name}" title="Retirer cette destination">✕</button>` : ""}
       </div>`;
+
+    // Le catalogue des itinéraires : indépendant de l'heure, il dit ce qui est possible.
+    // Les horaires du jour viennent d'`options` et de `fastest_now`, plus bas.
+    const timing = {};
+    (j.options || []).forEach(o => { timing[o.label] = timing[o.label] || {}; timing[o.label].leave = o.leave_at; });
+    (j.fastest_now || []).forEach(o => { timing[o.label] = timing[o.label] || {}; timing[o.label].arrive = o.arrive_at; timing[o.label].dur = o.duration_s; });
+
+    const routes = (j.patterns || []).map((p, i) => {
+      const chain = p.legs.map(l =>
+        `<span class="badge-sm" style="background:#${l.color || "888888"}" title="${l.mode}">${l.line}</span>`
+      ).join('<span class="arrow">›</span>');
+      const path = p.legs.map((l, k) =>
+        `${l.from} → ${l.to}${k < (p.transfers_s || []).length ? ` <span class="arrow">· corresp. ${fmtMin(p.transfers_s[k])} ·</span> ` : ""}`
+      ).join("");
+      const t = timing[p.label] || {};
+      const extra = [
+        t.leave ? `pars ${t.leave}` : null,
+        t.arrive ? `arrivée ${t.arrive}` : null,
+      ].filter(Boolean).join(" · ");
+      return `<div class="route ${i === 0 ? "best" : ""}">
+          <span class="chain">${chain}</span>
+          <span class="path">${fmtMin(p.walk_in_s)} à pied · ${path} · ${fmtMin(p.walk_out_s)} à pied</span>
+          <span class="dur"><b>${Math.round(p.total_s / 60)}′</b>${extra ? " · " + extra : ""}</span>
+        </div>`;
+    }).join("");
+
+    const routesBlock = routes
+      ? `<div class="routes"><h3>Itinéraires possibles (${j.patterns.length})</h3>${routes}</div>`
+      : "";
 
     // Indépendant de toute échéance : le plus rapide si on part tout de suite.
     const nowList = (j.fastest_now || []).map((o, i) => `<span>${i === 0 ? "→ " : ""}<strong>${o.label}</strong> arrivée ${o.arrive_at} (${fmtMin(o.duration_s)} porte à porte)</span>`).join(" ");
@@ -232,7 +342,8 @@ function render() {
       return `<div class="journey">${head}
         <div class="empty">${j.has_calendar ? "Rien de planifié pour l'instant." : "Pas d'agenda configuré pour cette destination."}</div>
         ${nowBlock}
-        ${next ? `<div class="alts">${next}</div>` : ""}</div>`;
+        ${next ? `<div class="alts">${next}</div>` : ""}
+        ${routesBlock}</div>`;
     }
 
     const left = dl.left_s === null ? null : dl.left_s - d;
@@ -274,6 +385,7 @@ function render() {
         </div>`).join("")}
       ${alts ? `<div class="alts">sinon : ${alts}</div>` : ""}
       ${nowBlock}
+      ${routesBlock}
     </div>`;
   }).join("");
 
@@ -401,6 +513,71 @@ $("reroute").addEventListener("click", async (e) => {
   e.target.disabled = false; e.target.textContent = "Recalculer les trajets";
 });
 $("pushnow").addEventListener("click", () => fetch("/api/push", { method: "POST" }));
+
+// ---- Ajout d'une destination -------------------------------------------------
+let picked = null;
+const msg = (text, kind = "") => { $("dest-msg").className = "msg " + kind; $("dest-msg").textContent = text; };
+
+async function searchPlace() {
+  const q = $("dest-q").value.trim();
+  if (q.length < 3) { msg("Tape au moins trois caractères.", "err"); return; }
+  msg("Recherche…");
+  $("dest-results").innerHTML = "";
+  picked = null; $("dest-add").disabled = true;
+  try {
+    const places = await (await fetch("/api/geocode?q=" + encodeURIComponent(q))).json();
+    if (!places.length) { msg("Aucun lieu trouvé. Essaie avec la ville.", "err"); return; }
+    msg("");
+    $("dest-results").innerHTML = places.map((p, i) =>
+      `<div class="result" data-i="${i}" data-lat="${p.lat}" data-lon="${p.lon}">${p.label}</div>`
+    ).join("");
+    // Un nom court est proposé d'office : le premier fragment de l'adresse suffit presque toujours.
+    if (!$("dest-name").value.trim()) $("dest-name").value = places[0].label.split(",")[0].slice(0, 24);
+  } catch (e) { msg("Recherche impossible : " + e, "err"); }
+}
+
+$("dest-search").addEventListener("click", searchPlace);
+$("dest-q").addEventListener("keydown", (e) => { if (e.key === "Enter") searchPlace(); });
+
+$("dest-results").addEventListener("click", (e) => {
+  const el = e.target.closest(".result");
+  if (!el) return;
+  document.querySelectorAll(".result").forEach(r => r.classList.remove("picked"));
+  el.classList.add("picked");
+  picked = { lat: Number(el.dataset.lat), lon: Number(el.dataset.lon) };
+  $("dest-add").disabled = false;
+  msg("");
+});
+
+$("dest-add").addEventListener("click", async () => {
+  if (!picked) return;
+  const name = $("dest-name").value.trim();
+  if (!name) { msg("Donne un nom court à cette destination.", "err"); return; }
+  $("dest-add").disabled = true;
+  msg("Ajout et recherche des itinéraires…");
+  const resp = await fetch("/api/destinations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, lat: picked.lat, lon: picked.lon, calendar: $("dest-cal").value.trim() }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { msg(data.error || "Ajout impossible.", "err"); $("dest-add").disabled = false; return; }
+  state = data; fetchedAt = Date.now(); render();
+  msg("Ajoutée. La recherche d'itinéraires tourne en arrière-plan.", "ok");
+  $("dest-q").value = ""; $("dest-name").value = ""; $("dest-cal").value = "";
+  $("dest-results").innerHTML = ""; picked = null;
+});
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-remove]");
+  if (!btn) return;
+  const name = btn.dataset.remove;
+  if (!confirm(`Retirer « ${name} » ?`)) return;
+  const resp = await fetch("/api/destinations/" + encodeURIComponent(name), { method: "DELETE" });
+  const data = await resp.json();
+  if (!resp.ok) { msg(data.error || "Suppression impossible.", "err"); return; }
+  state = data; fetchedAt = Date.now(); render();
+});
 
 refresh();
 setInterval(refresh, 5000);
