@@ -278,8 +278,15 @@ referme automatiquement quand tout revient.
 python scripts/check_sources.py     # exécutable à la main, sans rien installer d'autre que requests
 ```
 
-Les sources sont classées : le GTFS, rbgl et le GBFS sont **bloquants** ; le SPOTI et les
-routeurs sont **dégradés** — leur perte n'interrompt pas le service, elle retire un repli.
+Quatre états, parce que « ne répond pas » recouvre des situations très différentes :
+**panne** (GTFS, rbgl, GBFS : l'affichage s'arrête, il faut agir), **dégradé** (SPOTI,
+routeurs : un repli disparaît, le service tient), **accès refusé**, et ok.
+
+Ce dernier état vient d'un cas rencontré dès le premier passage : rbgl renvoie `403` aux
+runners GitHub alors qu'il répond parfaitement depuis une connexion domestique — vérifié,
+le User-Agent n'y est pour rien, c'est un filtrage réseau. Le traiter comme une panne
+aurait ouvert une issue chaque lundi pour un service en parfait état, et l'alerte aurait
+vite été ignorée. Une alerte qui crie au loup ne sert plus à rien.
 
 ## Tests
 
