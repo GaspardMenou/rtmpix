@@ -11,7 +11,8 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
-from . import gtfs, planner, render, stations as stations_mod
+from . import gtfs, planner, render
+from . import stations as stations_mod
 from .awtrix import Awtrix
 from .calibration import Calibration
 from .departures import build_boards
@@ -391,7 +392,7 @@ class Service:
                             "dep": timed[0].strftime("%H:%M"),
                             "arr": timed[1].strftime("%H:%M"),
                         }
-                        for leg, timed in zip(plan.pattern.legs, plan.legs)
+                        for leg, timed in zip(plan.pattern.legs, plan.legs, strict=True)
                     ],
                 }
                 for plan in journey.plans

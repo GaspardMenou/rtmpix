@@ -1,0 +1,37 @@
+[project]
+name = "rtmpix"
+version = "0.2.0"
+description = "Départs RTM, correspondances et vélos LeVélo sur horloge pixel et écran e-ink"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "Flask>=3.0",
+    "icalendar>=6.0",
+    "recurring-ical-events>=3.0",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+rtmpix = "rtmpix.main:main"
+
+[tool.setuptools.packages.find]
+include = ["rtmpix*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Les tests visent délibérément des fonctions internes.
+"tests/*" = ["E501"]

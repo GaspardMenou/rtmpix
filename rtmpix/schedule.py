@@ -14,9 +14,9 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
-from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 

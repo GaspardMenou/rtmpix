@@ -259,6 +259,39 @@ chiffres forment le code SPOTI — vérifié sans collision sur les 2 756 arrêt
 
 ---
 
+## Intégration continue
+
+Deux workflows, avec des rôles très différents :
+
+**`ci.yml`** — à chaque push : `ruff`, les tests sur Python 3.11 et 3.13 (les versions de
+Debian 12 et 13, les deux cibles possibles du LXC), `shellcheck` sur les scripts Proxmox, et
+une vérification que `config.example.yaml` reste chargeable.
+
+**`sources.yml`** — tous les lundis matin, et c'est le plus utile des deux. Le code de ce
+dépôt bouge peu ; ses dépendances ne sont pas sous notre contrôle. Ce workflow interroge
+réellement le GTFS, l'API rbgl, le SPOTI, le GBFS et les deux routeurs, et vérifie que les
+champs attendus sont toujours là — pas seulement que le serveur répond. En cas de casse il
+ouvre une issue (et commente l'existante au lieu d'en créer une par semaine), puis la
+referme automatiquement quand tout revient.
+
+```bash
+python scripts/check_sources.py     # exécutable à la main, sans rien installer d'autre que requests
+```
+
+Les sources sont classées : le GTFS, rbgl et le GBFS sont **bloquants** ; le SPOTI et les
+routeurs sont **dégradés** — leur perte n'interrompt pas le service, elle retire un repli.
+
+## Tests
+
+```bash
+pytest -q
+```
+
+Vingt tests sur ce qui casse en silence : le calcul à rebours avec correspondance, le
+passage de minuit (une course à 25:10 circule bien à 1h10), les exceptions de calendrier,
+les comparaisons insensibles aux accents, et la taille du buffer e-ink. Le réseau n'y est
+jamais sollicité — c'est le rôle de `check_sources.py`.
+
 ## Licence
 
 MIT.

@@ -1,0 +1,55 @@
+name: Sources externes
+
+# Le code de ce dépôt bouge peu ; ses dépendances, elles, ne sont pas sous notre contrôle.
+# api.rtm.fr n'est pas documentée, api-mobilite.rbgl.fr est un service bénévole, et la clé
+# du flux GTFS peut changer. On préfère l'apprendre ici que devant l'horloge.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # tous les lundis à 6h17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install requests
+
+      - name: Vérifier les sources
+        id: check
+        continue-on-error: true
+        run: python scripts/check_sources.py --markdown rapport.md
+
+      - name: Signaler la casse
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create sources --color d73a4a --description "Source de données externe en défaut" 2>/dev/null || true
+          # On commente l'issue existante plutôt que d'en ouvrir une par semaine.
+          existing=$(gh issue list --label sources --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file rapport.md
+          else
+            gh issue create --title "Une source de données ne répond plus" \
+                            --label sources --body-file rapport.md
+          fi
+
+      - name: Refermer l'alerte quand tout est revenu
+        if: steps.check.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          existing=$(gh issue list --label sources --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Toutes les sources répondent de nouveau. Refermeture automatique."
+            gh issue close "$existing"
+          fi

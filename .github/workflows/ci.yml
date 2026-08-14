@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 est la version de Debian 12, 3.13 celle de Debian 13 : les deux cibles
+        # possibles du conteneur LXC.
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -r requirements.txt pytest ruff
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q
+      - name: La configuration d'exemple doit rester chargeable
+        run: |
+          cp config.example.yaml config.yaml
+          python - <<'PY'
+          from rtmpix.config import load_config
+          cfg = load_config("config.yaml")
+          assert cfg.home.lat and cfg.awtrix.host
+          print("config.example.yaml : ok")
+          PY
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck des scripts Proxmox
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning proxmox/*.sh

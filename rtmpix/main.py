@@ -55,7 +55,8 @@ def cmd_stops(cfg, args) -> int:
         limit=False,
     )
     print(f"Depuis {cfg.home.label} ({cfg.home.lat}, {cfg.home.lon}) — rayon {cfg.transit.radius_m} m\n")
-    print(f"{'Station':<28} {'Mode':<12} {'Vol oiseau':>10} {'Par rue':>9} {'Marche':>8} {'Quai':>6} {'Total':>8}")
+    print(f"{'Station':<28} {'Mode':<12} {'Vol oiseau':>10} {'Par rue':>9} "
+          f"{'Marche':>8} {'Quai':>6} {'Total':>8}")
     print("-" * 88)
     for i, s in enumerate(found):
         total = s.lead_s(cfg.walk.overhead_s)
@@ -91,7 +92,8 @@ def cmd_once(cfg, args) -> int:
     if service.velo_stations:
         print()
         for v in service.velo_stations:
-            print(f"  🚲 {v.name[:28]:<28} {v.bikes} vélos / {v.docks} bornes libres  ({v.walk_s // 60}′ à pied)")
+            print(f"  🚲 {v.name[:28]:<28} {v.bikes} vélos / {v.docks} bornes libres  "
+                  f"({v.walk_s // 60}′ à pied)")
 
     if service.disruptions:
         print()
@@ -173,7 +175,7 @@ def _print_plans(service, journey, arrive_by, cfg, now, precomputed=None) -> Non
         when = f"dans {left // 60}′" if left >= 0 else f"il y a {-left // 60}′"
         print(f"  {marker} {plan.pattern.label:<10} PARS À {plan.leave_at:%H:%M} ({when})"
               f"   arrivée {plan.arrive_at:%H:%M}")
-        for leg, timed in zip(plan.pattern.legs, plan.legs):
+        for leg, timed in zip(plan.pattern.legs, plan.legs, strict=True):
             print(f"       {timed[0]:%H:%M} {leg.line:<4} {leg.from_name[:22]:<22}"
                   f" → {timed[1]:%H:%M} {leg.to_name[:22]}")
 

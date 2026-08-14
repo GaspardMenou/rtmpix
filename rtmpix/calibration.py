@@ -28,7 +28,7 @@ class Calibration:
     transfer: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path) -> "Calibration":
+    def load(cls, path: Path) -> Calibration:
         if not path.exists():
             return cls()
         try:
