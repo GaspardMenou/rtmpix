@@ -1,0 +1,38 @@
+services:
+  rtmpix:
+    build: .
+    image: rtmpix:latest
+    container_name: rtmpix
+    restart: unless-stopped
+
+    # Le réseau bridge par défaut suffit. rtmpix n'émet que des requêtes HTTP sortantes,
+    # y compris vers l'horloge : joindre 192.168.x.x depuis un conteneur bridge passe par
+    # la passerelle et fonctionne sans réglage particulier. `network_mode: host` ne
+    # servirait qu'à de la découverte mDNS ou du broadcast, dont ce service n'a pas besoin
+    # — et il est de toute façon inopérant sur Docker Desktop (macOS, Windows).
+    ports:
+      - "8723:8723"
+
+    environment:
+      TZ: Europe/Paris
+
+    volumes:
+      # La configuration reste sur l'hôte : elle contient ton adresse et l'IP de l'horloge.
+      - ./config.yaml:/app/config.yaml:ro
+      # Ce volume est le seul état précieux : base GTFS compilée, cache de routage piéton,
+      # calibrations chronométrées, et surtout l'historique de ponctualité. Le perdre
+      # reviendrait à repartir de zéro sur les marges mesurées.
+      - rtmpix-data:/app/data
+
+    # Un service qui interroge des API et dessine des images n'a besoin d'aucun privilège.
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  rtmpix-data:

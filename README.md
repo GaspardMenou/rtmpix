@@ -201,6 +201,31 @@ Mise à jour, depuis l'intérieur du conteneur :
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/GaspardMenou/rtmpix/main/proxmox/update.sh)"
 ```
 
+### Docker
+
+```bash
+cp config.example.yaml config.yaml   # renseigner home.lat/lon et awtrix.host
+docker compose up -d
+```
+
+**Le réseau ne demande rien de particulier.** rtmpix n'émet que des requêtes HTTP
+sortantes, y compris vers l'horloge : joindre `192.168.x.x` depuis un conteneur en bridge
+passe par la passerelle et fonctionne tel quel. `network_mode: host` ne servirait qu'à de
+la découverte mDNS, dont ce service n'a pas besoin — et il est de toute façon inopérant sur
+Docker Desktop.
+
+Deux points le concernent en revanche directement, et tous deux cassent en silence :
+
+- **`tzdata`** — tout le calcul repose sur `ZoneInfo("Europe/Paris")`, absente des images
+  slim. L'image l'installe et fixe `TZ` ; sans cela, une heure d'écart en été donnerait des
+  comptes à rebours faux sans jamais lever d'erreur.
+- **le volume `/app/data`** — il contient la base GTFS compilée, le cache de routage, tes
+  calibrations chronométrées et surtout **l'historique de ponctualité**. Le perdre revient à
+  repartir de zéro sur les marges mesurées, qui demandent plusieurs jours à se constituer.
+
+Vérifié : image de 198 Mo, `healthy` au bout d'une minute, et au redémarrage la base de
+194 Mo est réutilisée sans être recompilée.
+
 ### À la main
 
 ```bash

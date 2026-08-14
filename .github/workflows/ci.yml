@@ -44,3 +44,25 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=warning proxmox/*.sh
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Construire l'image
+        run: docker build -t rtmpix:ci .
+      - name: Le conteneur doit connaître Europe/Paris
+        # Sans tzdata, ZoneInfo lève au démarrage et tout le calcul horaire s'effondre.
+        run: |
+          docker run --rm rtmpix:ci -h >/dev/null 2>&1 || true
+          docker run --rm --entrypoint python rtmpix:ci -c "
+          from zoneinfo import ZoneInfo
+          from datetime import datetime
+          print(datetime.now(ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d %H:%M %Z'))"
+      - name: Le rendu e-ink doit trouver une police
+        run: |
+          docker run --rm --entrypoint python rtmpix:ci -c "
+          from rtmpix.eink import _font
+          f = _font(24, bold=True)
+          assert getattr(f, 'path', None), 'aucune police TrueType : le rendu serait illisible'
+          print('police:', f.path)"

@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+data
+tests
+scripts
+proxmox
+*.md
+config.yaml
+__pycache__
+*.py[cod]
+.DS_Store
