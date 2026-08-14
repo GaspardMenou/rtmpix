@@ -50,7 +50,17 @@ CREATE TABLE stop_times (
     trip_id     TEXT NOT NULL,
     stop_id     TEXT NOT NULL,
     departure_s INTEGER NOT NULL,
+    arrival_s   INTEGER NOT NULL,   -- nécessaire dès qu'on enchaîne : on arrive avant de repartir
     seq         INTEGER NOT NULL
+);
+-- Séquence d'arrêts représentative de chaque ligne et sens, extraite de la course la plus
+-- complète. Sert à découvrir les itinéraires possibles sans balayer les 1,3 M d'horaires.
+CREATE TABLE route_stops (
+    route_id     TEXT NOT NULL,
+    direction_id INTEGER NOT NULL,
+    seq          INTEGER NOT NULL,
+    stop_id      TEXT NOT NULL,
+    PRIMARY KEY (route_id, direction_id, seq)
 );
 CREATE TABLE calendar (
     service_id TEXT PRIMARY KEY,
@@ -79,9 +89,12 @@ CREATE INDEX idx_stop_times_trip ON stop_times (trip_id, seq);
 
 INDEXES = """
 CREATE INDEX idx_stop_times_lookup ON stop_times (stop_id, departure_s);
+CREATE INDEX idx_stop_times_arrival ON stop_times (stop_id, arrival_s);
 CREATE INDEX idx_trips_service ON trips (service_id);
+CREATE INDEX idx_trips_route ON trips (route_id, direction_id);
 CREATE INDEX idx_caldates ON calendar_dates (date, service_id);
 CREATE INDEX idx_stops_name ON stops (name);
+CREATE INDEX idx_route_stops_stop ON route_stops (stop_id);
 """
 
 DAY_COLUMNS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -171,14 +184,16 @@ def build_db(zip_bytes: bytes, db_path: Path, route_types: list[int], digest: st
             dep = parse_gtfs_time(st.get("departure_time") or st.get("arrival_time") or "")
             if dep is None:
                 continue  # arrêt sans horaire précis : inexploitable pour un compte à rebours
+            arr = parse_gtfs_time(st.get("arrival_time") or "")
             used_stops.add(st["stop_id"])
-            rows.append((st["trip_id"], st["stop_id"], dep, int(st["stop_sequence"])))
+            rows.append((st["trip_id"], st["stop_id"], dep, arr if arr is not None else dep,
+                         int(st["stop_sequence"])))
             if len(rows) >= 50_000:
-                conn.executemany("INSERT INTO stop_times VALUES (?,?,?,?)", rows)
+                conn.executemany("INSERT INTO stop_times VALUES (?,?,?,?,?)", rows)
                 inserted += len(rows)
                 rows.clear()
         if rows:
-            conn.executemany("INSERT INTO stop_times VALUES (?,?,?,?)", rows)
+            conn.executemany("INSERT INTO stop_times VALUES (?,?,?,?,?)", rows)
             inserted += len(rows)
         log.info("stop_times retenus : %d", inserted)
         conn.executescript(INDEXES_EARLY)
@@ -194,6 +209,25 @@ def build_db(zip_bytes: bytes, db_path: Path, route_types: list[int], digest: st
             "SELECT DISTINCT st.stop_id, r.route_type FROM stop_times st "
             "JOIN trips t ON t.trip_id = st.trip_id "
             "JOIN routes r ON r.route_id = t.route_id"
+        )
+
+        # Itinéraire de référence par ligne et sens : la course la plus complète. Les
+        # courses partielles (terminus avancé, services scolaires) en sont un sous-ensemble.
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO route_stops (route_id, direction_id, seq, stop_id)
+            SELECT t.route_id, t.direction_id, st.seq, st.stop_id
+            FROM stop_times st
+            JOIN trips t ON t.trip_id = st.trip_id
+            WHERE t.trip_id IN (
+                SELECT trip_id FROM (
+                    SELECT trip_id, ROW_NUMBER() OVER (
+                        PARTITION BY route_id, direction_id ORDER BY last_seq DESC, trip_id
+                    ) AS rn
+                    FROM trips
+                ) WHERE rn = 1
+            )
+            """
         )
 
         rows = []

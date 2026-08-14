@@ -142,6 +142,90 @@ def velo_app(station) -> tuple[str, dict]:
     return f"velo_{slug(station.name, 6)}", payload
 
 
+def format_hour(moment: datetime) -> str:
+    """8h00 s'écrit « 8h », 8h30 s'écrit « 8h30 » : on économise deux caractères sur trente-deux."""
+    return f"{moment.hour}h" if moment.minute == 0 else f"{moment.hour}h{moment.minute:02d}"
+
+
+def deadline_screen(journey, now: datetime) -> dict | None:
+    """« Il te reste X avant de devoir partir pour être à l'heure en cours. »"""
+    course = journey.course
+    if course is None:
+        return None
+
+    plan = journey.best
+    if plan is None:
+        return {
+            "state": "impossible",
+            "course": course.short,
+            "at": format_hour(course.start),
+            "left_s": None,
+            "value": "?",
+            "color": DEAD,
+            "route": "",
+        }
+
+    left = int((plan.leave_at - now).total_seconds())
+    if left < 0:
+        # Plus aucun itinéraire ne permet d'arriver à l'heure : le dire franchement.
+        return {
+            "state": "late",
+            "course": course.short,
+            "at": format_hour(course.start),
+            "left_s": left,
+            "value": "RETARD",
+            "color": NOW,
+            "route": plan.pattern.label,
+        }
+
+    return {
+        "state": "ok",
+        "course": course.short,
+        "at": format_hour(course.start),
+        "left_s": left,
+        "value": format_lead(left),
+        "color": urgency_color(left),
+        "route": plan.pattern.label,
+        "board_at": plan.board_at.strftime("%H:%M"),
+        "arrive_at": plan.arrive_at.strftime("%H:%M"),
+    }
+
+
+def deadline_app(journey, now: datetime, window_min: int) -> tuple[str, dict] | None:
+    """Écran du compte à rebours. Absent tant que l'échéance est lointaine."""
+    screen = deadline_screen(journey, now)
+    if screen is None:
+        return None
+    suffix = f"go_{slug(journey.destination.name, 6)}"
+
+    if screen["state"] == "late":
+        return suffix, {
+            "text": f"RETARD {screen['at']} {screen['course']}",
+            "color": NOW,
+            "scrollSpeed": 80,
+            "blinkText": 700,
+        }
+    if screen["state"] == "impossible":
+        return None
+    if screen["left_s"] > window_min * 60:
+        return None  # rien d'utile à afficher trois heures à l'avance
+
+    text = f"{screen['at']} {screen['value']}"
+    payload: dict = {
+        "text": [
+            {"t": f"{screen['at']} ", "c": DEAD},
+            {"t": screen["value"], "c": screen["color"]},
+        ],
+        "noScroll": len(text) <= 8,
+        "progress": max(0, min(100, int(100 * screen["left_s"] / (window_min * 60)))),
+        "progressC": f"#{screen['color']}",
+        "progressBC": "#101010",
+    }
+    if screen["left_s"] < 60:
+        payload["blinkText"] = 500
+    return suffix, payload
+
+
 def disruption_app(disruption) -> tuple[str, dict]:
     """Une perturbation, en défilement. Le titre suffit : il dit la ligne et le fait."""
     return (

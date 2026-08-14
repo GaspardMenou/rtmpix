@@ -58,6 +58,33 @@ class Transit:
 
 
 @dataclass
+class Destination:
+    """Un lieu où l'on doit arriver à l'heure, éventuellement piloté par un agenda."""
+
+    name: str
+    lat: float
+    lon: float
+    calendar: str = ""          # URL iCal ou chemin d'un fichier local
+    location_filter: str = ""   # ne retenir que les séances dont le lieu contient ceci
+    radius_m: int | None = None
+
+
+@dataclass
+class Journeys:
+    enabled: bool = False
+    destination_radius_m: int = 600   # rayon de recherche d'arrêts autour de la destination
+    transfer_radius_m: int = 350      # au-delà, ce n'est plus une correspondance
+    min_transfer_s: int = 120         # plancher : descendre, traverser, trouver le quai
+    max_options: int = 3              # itinéraires alternatifs conservés
+    max_origin_stops: int = 20        # arrêts candidats au départ, les plus proches d'abord
+    max_dest_stops: int = 12          # idem à l'arrivée
+    arrive_margin_s: int = 300        # être sur place cinq minutes avant le début
+    show_window_min: int = 150        # au-delà, le compte à rebours n'a pas sa place à l'écran
+    calendar_refresh_s: int = 1800
+    destinations: list[Destination] = field(default_factory=list)
+
+
+@dataclass
 class Sources:
     realtime: str = "rbgl"
     rbgl_base: str = "https://api-mobilite.rbgl.fr/api/v1"
@@ -99,6 +126,17 @@ class Web:
 
 
 @dataclass
+class Eink:
+    """Panneau e-ink 7,5″ : TRMNL, XIAO ePaper, ou tout ce qui sait afficher une image."""
+
+    enabled: bool = True
+    width: int = 800
+    height: int = 480
+    rotate: int = 0        # 0, 90, 180 ou 270 selon le montage du panneau
+    refresh_s: int = 900   # cadence annoncée au panneau ; il dort entre deux réveils
+
+
+@dataclass
 class Refresh:
     departures_s: int = 30   # interrogation des sources
     push_s: int = 10         # réémission vers l'horloge, pour que le compte à rebours descende
@@ -123,11 +161,13 @@ class Config:
     home: Home
     walk: Walk
     transit: Transit
+    journeys: Journeys
     sources: Sources
     disruptions: Disruptions
     velo: Velo
     awtrix: Awtrix
     web: Web
+    eink: Eink
     refresh: Refresh
     gtfs: Gtfs
     velo_gbfs: VeloGbfs
@@ -188,15 +228,27 @@ def load_config(path: str | Path) -> Config:
     if walk.engine not in ("valhalla", "osrm", "haversine"):
         raise SystemExit("walk.engine doit valoir valhalla, osrm ou haversine.")
 
+    journeys_raw = dict(_section(raw, "journeys"))
+    destinations = []
+    for item in journeys_raw.pop("destinations", None) or []:
+        if not isinstance(item, dict) or "lat" not in item or "lon" not in item:
+            raise SystemExit("Chaque journeys.destinations doit avoir au moins name, lat et lon.")
+        destinations.append(Destination(**item))
+    journeys = Journeys(**journeys_raw, destinations=destinations)
+    if journeys.enabled and not destinations:
+        raise SystemExit("journeys.enabled vaut true mais aucune destination n'est définie.")
+
     return Config(
         home=Home(**home_raw),
         walk=walk,
         transit=Transit(**_section(raw, "transit")),
+        journeys=journeys,
         sources=sources,
         disruptions=Disruptions(**_section(raw, "disruptions")),
         velo=Velo(**_section(raw, "velo")),
         awtrix=Awtrix(**awtrix_raw),
         web=Web(**_section(raw, "web")),
+        eink=Eink(**_section(raw, "eink")),
         refresh=Refresh(**_section(raw, "refresh")),
         gtfs=Gtfs(url=gtfs_raw["url"], data_dir=data_dir),
         velo_gbfs=VeloGbfs(**_section(raw, "velo_gbfs")),

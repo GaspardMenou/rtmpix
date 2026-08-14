@@ -8,19 +8,36 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import asdict
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 
-from . import gtfs, render, stations as stations_mod
+from . import gtfs, planner, render, stations as stations_mod
 from .awtrix import Awtrix
 from .calibration import Calibration
 from .departures import build_boards
 from .disruptions import DisruptionClient, relevant
 from .realtime import PARIS, RealtimeService
 from .routing import WalkRouter
+from .schedule import Course, ScheduleClient
 from .velo import VeloClient
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class JourneyState:
+    """Une destination, ses itinéraires possibles, et le prochain rendez-vous à tenir."""
+
+    destination: object
+    patterns: list = field(default_factory=list)
+    schedule: ScheduleClient | None = None
+    course: Course | None = None
+    plans: list = field(default_factory=list)
+
+    @property
+    def best(self):
+        """L'itinéraire qui laisse partir le plus tard — la réponse à « j'ai jusqu'à quand ? »."""
+        return self.plans[0] if self.plans else None
 
 
 class Service:
@@ -43,8 +60,10 @@ class Service:
         self.last_departures_at: datetime | None = None
         self.last_velo_at: datetime | None = None
         self.last_push_ok: bool | None = None
+        self.journeys: list[JourneyState] = []
 
         self.reload_stations()
+        self.setup_journeys()
 
     # ---------------------------------------------------------------- stations
 
@@ -89,6 +108,91 @@ class Service:
             self.calibration.save(self.cfg.calibration_path)
             self.reload_stations()
 
+    def set_transfer(self, station_name: str, seconds: int | None) -> None:
+        """Temps de correspondance réel à une station (None revient au calcul automatique)."""
+        with self.lock:
+            if seconds is None:
+                self.calibration.transfer.pop(station_name, None)
+            else:
+                self.calibration.transfer[station_name] = max(0, int(seconds))
+            self.calibration.save(self.cfg.calibration_path)
+            self.setup_journeys()
+
+    # ----------------------------------------------------------------- trajets
+
+    def setup_journeys(self) -> None:
+        """Découvre les itinéraires vers chaque destination. Coûteux : fait au démarrage."""
+        if not self.cfg.journeys.enabled:
+            self.journeys = []
+            return
+
+        origin = {"lat": self.cfg.home.lat, "lon": self.cfg.home.lon}
+        found: list[JourneyState] = []
+        for destination in self.cfg.journeys.destinations:
+            log.info("Itinéraires vers %s :", destination.name)
+            patterns = planner.discover(
+                self.conn,
+                self.cfg,
+                self.router,
+                origin,
+                {"lat": destination.lat, "lon": destination.lon, "radius_m": destination.radius_m},
+                self.calibration,
+            )
+            schedule = None
+            if destination.calendar:
+                cache = self.cfg.gtfs.data_dir / f"ical-{render.slug(destination.name, 12)}.ics"
+                schedule = ScheduleClient(
+                    destination.calendar, cache,
+                    timeout_s=self.cfg.sources.timeout_s,
+                    user_agent=self.cfg.sources.user_agent,
+                )
+                schedule.refresh()
+            found.append(JourneyState(destination=destination, patterns=patterns, schedule=schedule))
+
+        with self.lock:
+            self.journeys = found
+
+    def refresh_schedules(self) -> None:
+        for journey in self.journeys:
+            if journey.schedule is not None:
+                journey.schedule.refresh()
+
+    def refresh_journeys(self) -> None:
+        """Recalcule, pour chaque destination, la dernière minute possible pour partir."""
+        if not self.journeys:
+            return
+        now = datetime.now(PARIS)
+        margin = timedelta(seconds=self.cfg.journeys.arrive_margin_s)
+
+        for journey in self.journeys:
+            course = (
+                journey.schedule.next_course(now, journey.destination.location_filter)
+                if journey.schedule
+                else None
+            )
+            plans = []
+            if course is not None:
+                arrive_by = course.start - margin
+                for pattern in journey.patterns:
+                    plan = planner.latest_departure(
+                        self.conn, pattern, arrive_by, self.cfg.walk.overhead_s
+                    )
+                    if plan is not None:
+                        plans.append(plan)
+                # Le meilleur itinéraire est celui qui autorise le départ le plus tardif.
+                # À départ égal, on départage comme le ferait un humain : le moins de
+                # marche d'abord, l'arrivée la plus tôt ensuite.
+                plans.sort(
+                    key=lambda p: (
+                        -p.leave_at.timestamp(),
+                        p.pattern.walk_in_s + p.pattern.walk_out_s,
+                        p.arrive_at.timestamp(),
+                    )
+                )
+            with self.lock:
+                journey.course = course
+                journey.plans = plans
+
     # ----------------------------------------------------------------- sources
 
     def refresh_departures(self) -> None:
@@ -128,6 +232,11 @@ class Service:
         now = now or datetime.now(PARIS)
         apps: dict[str, dict] = {}
         with self.lock:
+            # L'échéance passe en tête : c'est l'information la plus contraignante.
+            for journey in self.journeys:
+                built = render.deadline_app(journey, now, self.cfg.journeys.show_window_min)
+                if built is not None:
+                    apps[built[0]] = {**built[1], "pos": 0}
             for board in self.boards:
                 suffix, payload = render.board_app(board, now)
                 apps[suffix] = payload
@@ -230,4 +339,65 @@ class Service:
                     }
                     for d in self.disruptions
                 ],
+                "journeys": [self._journey_snapshot(j, now) for j in self.journeys],
             }
+
+    def _journey_snapshot(self, journey: JourneyState, now: datetime) -> dict:
+        screen = render.deadline_screen(journey, now)
+        return {
+            "name": journey.destination.name,
+            "has_calendar": journey.schedule is not None,
+            "course": (
+                {
+                    "summary": journey.course.summary,
+                    "short": journey.course.short,
+                    "start": journey.course.start.strftime("%a %d/%m %H:%M"),
+                    "start_h": render.format_hour(journey.course.start),
+                    "location": journey.course.location,
+                }
+                if journey.course
+                else None
+            ),
+            "upcoming": (
+                [
+                    {
+                        "summary": c.summary,
+                        "start": c.start.strftime("%a %d/%m %H:%M"),
+                        "location": c.location,
+                    }
+                    for c in journey.schedule.upcoming(4, now)
+                ]
+                if journey.schedule
+                else []
+            ),
+            "deadline": screen,
+            "options": [
+                {
+                    "label": plan.pattern.label,
+                    "describe": plan.pattern.describe(),
+                    "leave_at": plan.leave_at.strftime("%H:%M"),
+                    "leave_in_s": int((plan.leave_at - now).total_seconds()),
+                    "board_at": plan.board_at.strftime("%H:%M"),
+                    "arrive_at": plan.arrive_at.strftime("%H:%M"),
+                    "walk_in_s": plan.pattern.walk_in_s,
+                    "walk_out_s": plan.pattern.walk_out_s,
+                    "transfers_s": plan.pattern.transfers_s,
+                    "legs": [
+                        {
+                            "line": leg.line,
+                            "color": leg.color,
+                            "from": leg.from_name,
+                            "to": leg.to_name,
+                            "dep": timed[0].strftime("%H:%M"),
+                            "arr": timed[1].strftime("%H:%M"),
+                        }
+                        for leg, timed in zip(plan.pattern.legs, plan.legs)
+                    ],
+                }
+                for plan in journey.plans
+            ],
+            "patterns": [
+                {"label": p.label, "describe": p.describe(), "total_s": p.total_s}
+                for p in journey.patterns
+            ],
+        }

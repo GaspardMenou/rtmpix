@@ -7,7 +7,7 @@ import logging
 import signal
 import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from . import gtfs, render, web
 from .config import load_config
@@ -105,6 +105,79 @@ def cmd_once(cfg, args) -> int:
     return 0
 
 
+def cmd_journey(cfg, args) -> int:
+    """Détail des itinéraires et de l'heure limite de départ."""
+    if not cfg.db_path.exists():
+        print("Base absente : lance d'abord `rtmpix build`.", file=sys.stderr)
+        return 1
+    if not cfg.journeys.enabled:
+        print("journeys.enabled est à false dans la config.", file=sys.stderr)
+        return 1
+
+    service = Service(cfg)
+    service.refresh_journeys()
+    now = datetime.now(PARIS)
+
+    for journey in service.journeys:
+        dest = journey.destination
+        print(f"\n=== {dest.name} ({dest.lat}, {dest.lon}) ===")
+
+        if not journey.patterns:
+            print("  Aucun itinéraire trouvé. Élargis journeys.destination_radius_m.")
+            continue
+
+        print(f"\n  Itinéraires possibles ({len(journey.patterns)}) :")
+        for pattern in journey.patterns:
+            print(f"    {pattern.label:<12} ~{pattern.total_s // 60:>2}′  {pattern.describe()}")
+
+        if journey.course is None:
+            print("\n  Aucun cours à venir (agenda absent, vide, ou terminé).")
+            if args.at:
+                target = datetime.strptime(args.at, "%Y-%m-%d %H:%M").replace(tzinfo=PARIS)
+                print(f"  Simulation d'une arrivée pour {target:%A %d/%m à %H:%M} :\n")
+                _print_plans(service, journey, target, cfg, now)
+            continue
+
+        course = journey.course
+        print(f"\n  Prochain cours : {course.summary}")
+        print(f"    {course.start:%A %d/%m à %H:%M}" + (f" · {course.location}" if course.location else ""))
+        arrive_by = course.start - timedelta(seconds=cfg.journeys.arrive_margin_s)
+        print(f"    être sur place à {arrive_by:%H:%M} (marge {cfg.journeys.arrive_margin_s // 60}′)\n")
+        _print_plans(service, journey, arrive_by, cfg, now, precomputed=journey.plans)
+
+    return 0
+
+
+def _print_plans(service, journey, arrive_by, cfg, now, precomputed=None) -> None:
+    from . import planner
+
+    plans = precomputed
+    if plans is None:
+        plans = [
+            p
+            for p in (
+                planner.latest_departure(service.conn, pat, arrive_by, cfg.walk.overhead_s)
+                for pat in journey.patterns
+            )
+            if p is not None
+        ]
+        plans.sort(key=lambda p: p.leave_at, reverse=True)
+
+    if not plans:
+        print("    Aucun itinéraire ne permet d'arriver à l'heure.")
+        return
+
+    for rank, plan in enumerate(plans):
+        left = int((plan.leave_at - now).total_seconds())
+        marker = "→" if rank == 0 else " "
+        when = f"dans {left // 60}′" if left >= 0 else f"il y a {-left // 60}′"
+        print(f"  {marker} {plan.pattern.label:<10} PARS À {plan.leave_at:%H:%M} ({when})"
+              f"   arrivée {plan.arrive_at:%H:%M}")
+        for leg, timed in zip(plan.pattern.legs, plan.legs):
+            print(f"       {timed[0]:%H:%M} {leg.line:<4} {leg.from_name[:22]:<22}"
+                  f" → {timed[1]:%H:%M} {leg.to_name[:22]}")
+
+
 def cmd_check(cfg, args) -> int:
     from .awtrix import Awtrix
     from .disruptions import DisruptionClient
@@ -158,7 +231,9 @@ def cmd_run(cfg, args) -> int:
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
 
-    next_departures = next_velo = next_disruptions = next_push = 0.0
+    next_departures = next_velo = next_disruptions = next_push = next_journeys = 0.0
+    # L'agenda vient d'être chargé au démarrage : inutile de le retélécharger tout de suite.
+    next_schedules = time.monotonic() + cfg.journeys.calendar_refresh_s
     last_gtfs_check: date | None = None
 
     while not stop:
@@ -173,6 +248,12 @@ def cmd_run(cfg, args) -> int:
             if tick >= next_disruptions:
                 service.refresh_disruptions()
                 next_disruptions = tick + cfg.disruptions.refresh_s
+            if tick >= next_journeys:
+                service.refresh_journeys()
+                next_journeys = tick + cfg.refresh.departures_s
+            if tick >= next_schedules:
+                service.refresh_schedules()
+                next_schedules = tick + cfg.journeys.calendar_refresh_s
             if tick >= next_push:
                 # On repousse plus souvent qu'on ne récupère : le compte à rebours doit
                 # descendre à l'écran même entre deux interrogations des sources.
@@ -208,6 +289,9 @@ def main(argv=None) -> int:
     sub.add_parser("stops", help="liste les stations proches et le budget de temps")
     p_once = sub.add_parser("once", help="une passe, affichée en console")
     p_once.add_argument("--push", action="store_true", help="envoie aussi vers l'horloge")
+    p_journey = sub.add_parser("journey", help="itinéraires et heure limite de départ")
+    p_journey.add_argument("--at", metavar="'YYYY-MM-DD HH:MM'",
+                           help="simule une heure d'arrivée, sans agenda")
     sub.add_parser("check", help="teste les sources et l'horloge")
     sub.add_parser("run", help="boucle de service + dashboard")
 
@@ -219,6 +303,7 @@ def main(argv=None) -> int:
         "build": cmd_build,
         "stops": cmd_stops,
         "once": cmd_once,
+        "journey": cmd_journey,
         "check": cmd_check,
         "run": cmd_run,
     }

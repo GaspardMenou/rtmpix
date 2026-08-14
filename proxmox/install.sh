@@ -117,7 +117,7 @@ info "Installation des paquets (une minute environ)…"
 pct exec "$CTID" -- bash -c "
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends python3 python3-venv python3-pip git ca-certificates tzdata >/dev/null
+  apt-get install -y -qq --no-install-recommends python3 python3-venv python3-pip git ca-certificates tzdata fonts-dejavu-core >/dev/null
 " || die "Installation des paquets échouée."
 ok "Paquets installés"
 

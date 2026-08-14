@@ -95,6 +95,27 @@
   .alert .c { color: var(--muted); font-size: 13px; margin-top: 4px; }
   .empty { color: var(--muted); font-size: 14px; font-style: italic; }
   .hint { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
+
+  /* Trajet : l'heure limite de départ est l'information dominante de la page. */
+  .journey { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 12px; }
+  .journey-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .journey-head .dest { font-size: 16px; font-weight: 600; }
+  .journey-head .course { color: var(--muted); font-size: 14px; }
+  .leave { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+  .leave .big { font-family: var(--mono); font-size: 52px; font-weight: 700; line-height: 1; }
+  .leave .sub { color: var(--muted); font-size: 13px; font-family: var(--mono); }
+  .legs { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .leg { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+  .badge {
+    font-family: var(--mono); font-weight: 700; font-size: 12px; color: #000;
+    padding: 3px 8px; border-radius: 5px; min-width: 34px; text-align: center;
+  }
+  .leg .when { font-family: var(--mono); color: var(--muted); font-size: 13px; }
+  .alts { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  .alts span { margin-right: 16px; }
+  .eink-link { margin-left: auto; font-size: 13px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -109,6 +130,8 @@
       <span class="pill" id="now">—</span>
     </div>
   </header>
+
+  <div id="journeys"></div>
 
   <h2>Ce que montre l'horloge</h2>
   <div class="screens" id="screens"></div>
@@ -176,6 +199,65 @@ function render() {
   $("clock-state").textContent = state.awtrix.enabled ? (ok === null ? "horloge —" : ok ? `horloge ${state.awtrix.host}` : "horloge injoignable") : "horloge désactivée";
   $("clock-state").className = "pill " + (ok === true ? "ok" : ok === false ? "bad" : "");
   $("now").textContent = new Date().toLocaleTimeString("fr-FR");
+
+  // Trajets : l'heure limite de départ prime sur tout le reste.
+  $("journeys").innerHTML = (state.journeys || []).map(j => {
+    const dl = j.deadline;
+    const opt = (j.options || [])[0];
+    let head = `<div class="journey-head">
+        <span class="dest">${j.name}</span>
+        ${j.course ? `<span class="course">${j.course.summary} · ${j.course.start}${j.course.location ? " · " + j.course.location : ""}</span>` : '<span class="course">aucun cours à venir</span>'}
+        <a class="eink-link" href="/eink.png" target="_blank">aperçu e-ink ↗</a>
+      </div>`;
+
+    if (!dl || !opt) {
+      const next = (j.upcoming || []).slice(0, 3)
+        .map(c => `<span>${c.start} · ${c.summary}</span>`).join(" ");
+      return `<div class="journey">${head}
+        <div class="empty">${j.has_calendar ? "Rien de planifié pour l'instant." : "Pas d'agenda configuré pour cette destination."}</div>
+        ${next ? `<div class="alts">${next}</div>` : ""}</div>`;
+    }
+
+    const left = dl.left_s === null ? null : dl.left_s - d;
+    const late = dl.state === "late" || (left !== null && left < 0);
+    const color = late ? "var(--now)" : urgency(left);
+
+    const legs = (opt.legs || []).map(l => `<div class="leg">
+        <span class="badge" style="background:#${l.color || "888888"}">${l.line}</span>
+        <span class="when">${l.dep}</span> <span>${l.from}</span>
+        <span style="color:var(--muted)">→</span>
+        <span class="when">${l.arr}</span> <span>${l.to}</span>
+      </div>`).join("");
+
+    const alts = (j.options || []).slice(1).map(o =>
+      `<span>${o.label} → pars ${o.leave_at}, arrivée ${o.arrive_at}</span>`).join("");
+
+    return `<div class="journey">${head}
+      <div class="leave">
+        <div>
+          <div class="sub">${late ? "trop tard pour" : "pars à"}</div>
+          <div class="big" style="color:${color}">${late ? "RETARD" : opt.leave_at}</div>
+        </div>
+        <div>
+          <div class="sub">il reste</div>
+          <div class="big" style="color:${color}">${late ? "—" : fmtLead(left)}</div>
+        </div>
+        <div class="sub">
+          ${opt.label}<br>
+          départ ${opt.board_at} · arrivée ${opt.arrive_at}<br>
+          marche ${fmtMin(opt.walk_in_s)} + ${fmtMin(opt.walk_out_s)}
+        </div>
+      </div>
+      <div class="legs">${legs}</div>
+      ${(opt.transfers_s || []).map((t, i) => `<div class="alts">
+          correspondance à <strong>${opt.legs[i].to}</strong> :
+          <input type="number" min="0" step="15" value="${t}"
+                 data-station="${opt.legs[i].to}" data-field="transfer_s"> s
+          <span class="src">temps réel pour descendre du ${opt.legs[i].line} et rejoindre le ${opt.legs[i + 1].line}</span>
+        </div>`).join("")}
+      ${alts ? `<div class="alts">sinon : ${alts}</div>` : ""}
+    </div>`;
+  }).join("");
 
   // Aperçu matrice
   $("screens").innerHTML = state.boards.map(b => {

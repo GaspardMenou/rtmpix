@@ -3,10 +3,11 @@
 La config décrit l'intention, la calibration décrit le terrain. On les sépare pour que
 `rtmpix calibrate` puisse écrire sans réécrire le YAML commenté de l'utilisateur.
 
-Trois choses se calibrent :
-  pace_factor   ton allure par rapport à celle du routeur (0.85 = tu marches plus vite)
-  access[gare]  temps entre l'entrée de la station et le quai
-  walk[gare]    temps de marche mesuré, qui court-circuite complètement le routeur
+Ce qui se calibre :
+  pace_factor     ton allure par rapport à celle du routeur (0.85 = tu marches plus vite)
+  access[gare]    temps entre l'entrée de la station et le quai
+  walk[gare]      temps de marche mesuré, qui court-circuite complètement le routeur
+  transfer[gare]  temps de correspondance réel (quai du métro → arrêt de bus)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class Calibration:
     pace_factor: float = 1.0
     access: dict[str, int] = field(default_factory=dict)
     walk: dict[str, int] = field(default_factory=dict)
+    transfer: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "Calibration":
@@ -38,6 +40,7 @@ class Calibration:
             pace_factor=float(raw.get("pace_factor", 1.0)),
             access={str(k): int(v) for k, v in (raw.get("access") or {}).items()},
             walk={str(k): int(v) for k, v in (raw.get("walk") or {}).items()},
+            transfer={str(k): int(v) for k, v in (raw.get("transfer") or {}).items()},
         )
 
     def save(self, path: Path) -> None:

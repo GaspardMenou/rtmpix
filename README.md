@@ -48,6 +48,63 @@ arrive — le chiffre s'affiche préfixé d'un `~` au lieu de faire semblant.
 
 ---
 
+## Trajets avec correspondance et heure limite
+
+Le vrai besoin n'est pas « quand passe le prochain métro » mais **« j'ai jusqu'à quelle
+heure avant d'être en retard en cours »**. rtmpix lit l'emploi du temps iCal de l'école,
+prend le prochain cours, et calcule **à rebours** :
+
+```
+cours à 8h00  →  être là 7h55  →  dernier bus qui arrive à temps
+              →  dernier métro pour l'attraper  →  PARS À 07:21
+```
+
+Les itinéraires ne se configurent pas : ils se découvrent. À partir du domicile et des
+coordonnées de la destination, rtmpix énumère les enchaînements de lignes possibles (une
+correspondance au plus) et garde les meilleurs :
+
+```
+$ rtmpix journey
+
+  Itinéraires possibles (3) :
+    M1 › B3      ~23′  8′ à pied · M1 Cinq Avenues → La Rose · corresp. 2′ · B3 Métro La Rose → Technopôle Centrale Med · 2′ à pied
+    M1 › 142     ~25′  …
+    M1 › 1       ~25′  …
+
+  Prochain cours : Mécanique des fluides - CM
+    lundi 17/08 à 08:00 · Centrale Méditerranée - Amphi 1
+
+  → M1 › B3    PARS À 07:21 (dans 42′)   arrivée 07:52
+       07:31 M1   Cinq Avenues Longchamp → 07:39 La Rose
+       07:48 B3   Métro La Rose          → 07:50 Technopôle Centrale Med
+```
+
+Les itinéraires suivants ne sont pas du décor : ce sont les plans B quand une ligne saute.
+
+**Une correspondance ne se détecte pas par le nom.** À La Rose, le quai du métro s'appelle
+`La Rose` et l'arrêt de bus `Métro La Rose`, et selon le quai ils sont distants de 3 à
+500 m. rtmpix apparie donc les arrêts géométriquement, et le temps de correspondance se
+règle au chronomètre depuis le dashboard — c'est souvent lui qui décide. Exemple mesuré :
+en passant la correspondance de 120 s à 240 s, le B3 tient toujours 07:21 (il passe toutes
+les 2 min), mais les lignes 1 et 142 reculent à 07:14.
+
+## Écran e-ink
+
+Le service produit aussi une image 800×480 pour un panneau e-ink 7,5″ (TRMNL, XIAO ePaper
+Panel, ou tout ce qui sait afficher un BMP) :
+
+| Endpoint | Usage |
+|---|---|
+| `/eink.png` | aperçu dans un navigateur |
+| `/eink.bmp` | BMP 1 bit, ce qu'attendent les panneaux |
+| `/eink.raw` | buffer 1 bpp brut (48 000 octets), pour un firmware ESP32 minimal |
+| `/api/display` | protocole TRMNL « BYOS » (écrit d'après la doc, **non vérifié sur matériel**) |
+
+Un e-ink se rafraîchit toutes les cinq à quinze minutes : **on n'y met jamais de compte à
+rebours**, qui serait faux avant même d'être lu. Il affiche des heures absolues (« PARS À
+07:21 »), le détail du trajet, les prochains passages et les perturbations. L'horloge dit
+l'urgence, l'e-ink dit le plan.
+
 ## Sources de données
 
 | Donnée | Source | Statut |

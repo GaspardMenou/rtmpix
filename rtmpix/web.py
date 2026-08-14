@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ def create_app(service) -> Flask:
         if station and "walk_s" in payload:
             value = payload["walk_s"]
             service.set_walk(station, None if value in ("", None) else int(value))
+        if station and "transfer_s" in payload:
+            value = payload["transfer_s"]
+            service.set_transfer(station, None if value in ("", None) else int(value))
+            service.refresh_journeys()
 
         return jsonify(service.snapshot())
 
@@ -52,6 +57,65 @@ def create_app(service) -> Flask:
     def push():
         service.push()
         return jsonify({"ok": service.last_push_ok})
+
+    # ------------------------------------------------------------------- e-ink
+
+    def _render_eink():
+        from . import eink
+
+        cfg = service.cfg.eink
+        image = eink.render(service.snapshot(), cfg.width, cfg.height)
+        if cfg.rotate:
+            image = image.rotate(cfg.rotate, expand=True)
+        return image
+
+    @app.get("/eink.png")
+    def eink_png():
+        from . import eink
+
+        return Response(eink.to_png(_render_eink()), mimetype="image/png",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/eink.bmp")
+    def eink_bmp():
+        from . import eink
+
+        return Response(eink.to_bmp_1bit(_render_eink()), mimetype="image/bmp",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/eink.raw")
+    def eink_raw():
+        """Buffer 1 bit par pixel, pour un firmware qui ne veut décoder aucun format."""
+        from . import eink
+
+        return Response(eink.to_packed_1bpp(_render_eink()),
+                        mimetype="application/octet-stream",
+                        headers={"Cache-Control": "no-store"})
+
+    # Protocole TRMNL « BYOS » : le panneau demande où trouver son image et quand revenir.
+    # Écrit d'après la documentation publique, non vérifié sur un appareil réel.
+    @app.get("/api/setup")
+    @app.get("/api/setup/")
+    def trmnl_setup():
+        return jsonify({
+            "status": 200,
+            "api_key": "rtmpix-local",
+            "friendly_id": "RTMPIX",
+            "image_url": f"{request.url_root.rstrip('/')}/eink.bmp",
+            "message": "rtmpix",
+        })
+
+    @app.get("/api/display")
+    def trmnl_display():
+        stamp = datetime.now().strftime("%Y%m%d%H%M")
+        return jsonify({
+            "status": 0,
+            "image_url": f"{request.url_root.rstrip('/')}/eink.bmp?v={stamp}",
+            "filename": f"rtmpix-{stamp}.bmp",
+            "refresh_rate": service.cfg.eink.refresh_s,
+            "reset_firmware": False,
+            "update_firmware": False,
+        })
 
     return app
 
