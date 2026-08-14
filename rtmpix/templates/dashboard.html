@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rtmpix — réglages</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23009fe3'/><text x='16' y='23' font-size='19' font-family='monospace' font-weight='bold' text-anchor='middle' fill='%23fff'>r</text></svg>">
 <style>
   :root {
     --bg: #0b0e13;
@@ -378,10 +379,14 @@ function render() {
       </div>
       <div class="legs">${legs}</div>
       ${(opt.transfers_s || []).map((t, i) => `<div class="alts">
-          correspondance à <strong>${opt.legs[i].to}</strong> :
-          <input type="number" min="0" step="15" value="${t}"
+          correspondance à <strong>${opt.legs[i].to}</strong> —
+          descendre du ${opt.legs[i].line} et s'orienter :
+          <input type="number" min="0" step="15" value="${(opt.transfer_fixed_s || [])[i] ?? ""}"
                  data-station="${opt.legs[i].to}" data-field="transfer_s"> s
-          <span class="src">temps réel pour descendre du ${opt.legs[i].line} et rejoindre le ${opt.legs[i + 1].line}</span>
+          <span class="src">
+            + ${t - ((opt.transfer_fixed_s || [])[i] ?? 0)} s de marche jusqu'à l'arrêt du ${opt.legs[i + 1].line}
+            = <strong>${t} s</strong> au total
+          </span>
         </div>`).join("")}
       ${alts ? `<div class="alts">sinon : ${alts}</div>` : ""}
       ${nowBlock}

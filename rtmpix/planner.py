@@ -55,6 +55,10 @@ class Pattern:
     walk_in_s: int
     walk_out_s: int
     transfers_s: list[int] = field(default_factory=list)
+    # Part fixe de chaque correspondance — descendre, sortir, s'orienter — hors marche
+    # jusqu'à l'arrêt de reprise. C'est cette part que l'on règle au chronomètre ; le
+    # total, lui, dépend de l'arrêt choisi et se recalcule.
+    transfer_fixed_s: list[int] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -327,6 +331,7 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
                         walk_in_s=walk_to(first["o"], origin["lat"], origin["lon"]),
                         walk_out_s=walk_from(second["d"], destination["lat"], destination["lon"]),
                         transfers_s=[transfer],
+                        transfer_fixed_s=[fixed],
                     )
                 )
 

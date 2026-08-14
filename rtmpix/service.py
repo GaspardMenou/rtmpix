@@ -552,6 +552,7 @@ class Service:
                     "walk_in_s": plan.pattern.walk_in_s,
                     "walk_out_s": plan.pattern.walk_out_s,
                     "transfers_s": plan.pattern.transfers_s,
+                    "transfer_fixed_s": plan.pattern.transfer_fixed_s,
                     "legs": [
                         {
                             "line": leg.line,

@@ -48,6 +48,13 @@ arrive — le chiffre s'affiche préfixé d'un `~` au lieu de faire semblant.
 
 ---
 
+## Le dashboard
+
+![Dashboard rtmpix](docs/dashboard.png)
+
+Tout se règle depuis cette page : les trajets et leurs itinéraires, les temps chronométrés,
+l'allure. Le détail plus bas.
+
 ## Trajets avec correspondance et heure limite
 
 Le vrai besoin n'est pas « quand passe le prochain métro » mais **« j'ai jusqu'à quelle
