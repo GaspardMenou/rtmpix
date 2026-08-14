@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "rtmpix"
 version = "0.2.0"
@@ -24,6 +28,9 @@ include = ["rtmpix*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `python -m pytest` ajoute le dossier courant au sys.path, mais pas `pytest` seul :
+# sans cette ligne, la suite passe en local et échoue en CI.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 110
