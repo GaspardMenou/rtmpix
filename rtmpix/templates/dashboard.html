@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rtmpix — réglages</title>
+<style>
+  :root {
+    --bg: #0b0e13;
+    --panel: #141922;
+    --panel-2: #1b212c;
+    --line: #262e3b;
+    --text: #e6eaf2;
+    --muted: #8b96a8;
+    --accent: #009fe3;
+    --calm: #22c55e;
+    --soon: #facc15;
+    --hurry: #fb923c;
+    --now: #ef4444;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); }
+  h2 {
+    margin: 32px 0 12px; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  }
+  .status { margin-left: auto; display: flex; gap: 14px; align-items: center; font-size: 13px; }
+  .pill {
+    font-family: var(--mono); font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill.ok { color: var(--calm); border-color: color-mix(in srgb, var(--calm) 35%, var(--line)); }
+  .pill.warn { color: var(--soon); border-color: color-mix(in srgb, var(--soon) 35%, var(--line)); }
+  .pill.bad { color: var(--now); border-color: color-mix(in srgb, var(--now) 35%, var(--line)); }
+
+  /* Aperçu de la matrice : 32x8 pixels, agrandie 8 fois. */
+  .screens { display: flex; flex-wrap: wrap; gap: 14px; }
+  .screen {
+    width: 256px; height: 64px; background: #000; border-radius: 6px;
+    border: 1px solid var(--line); position: relative; overflow: hidden;
+    display: flex; align-items: center; padding: 0 8px;
+    font-family: var(--mono); font-size: 26px; font-weight: 600; letter-spacing: 0.02em;
+  }
+  .screen .bar { position: absolute; left: 0; bottom: 0; height: 4px; }
+  .screen.blink { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0.35; } }
+  .screen-label { font-size: 11px; color: var(--muted); margin-top: 5px; font-family: var(--mono); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card .top { display: flex; align-items: baseline; gap: 8px; }
+  .card .line { font-family: var(--mono); font-weight: 700; font-size: 18px; }
+  .card .terminus { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .lead { font-family: var(--mono); font-size: 34px; font-weight: 700; margin: 6px 0 2px; }
+  .card .breakdown { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .card .times { margin-top: 8px; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .theo { color: var(--soon); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 13px; }
+  td.name { font-family: inherit; font-size: 14px; }
+  input[type=number] {
+    width: 74px; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 5px 8px; font-family: var(--mono); font-size: 13px;
+  }
+  input[type=number]:focus { outline: none; border-color: var(--accent); }
+  input[type=range] { width: 200px; accent-color: var(--accent); }
+  .src { font-size: 11px; color: var(--muted); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 13px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+  .alert { background: var(--panel); border-left: 3px solid var(--now); border-radius: 0 8px 8px 0; padding: 12px 16px; margin-bottom: 10px; }
+  .alert.minor { border-left-color: var(--hurry); }
+  .alert .t { font-weight: 600; font-size: 14px; }
+  .alert .c { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .empty { color: var(--muted); font-size: 14px; font-style: italic; }
+  .hint { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>rtm<span>pix</span></h1>
+    <span class="pill" id="home">{{ home.label }}</span>
+    <div class="status">
+      <span class="pill" id="src">source —</span>
+      <span class="pill" id="clock-state">horloge —</span>
+      <span class="pill" id="now">—</span>
+    </div>
+  </header>
+
+  <h2>Ce que montre l'horloge</h2>
+  <div class="screens" id="screens"></div>
+
+  <h2>Départs</h2>
+  <div class="cards" id="boards"></div>
+
+  <h2>Temps porte-à-quai</h2>
+  <p class="hint">
+    <strong>Marche</strong> vient du routeur piéton (vide = automatique, une valeur = ton chrono).
+    <strong>Quai</strong> est le temps entre l'entrée de la station et la rame — quasi nul en
+    surface, deux bonnes minutes dans les stations à couloirs.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Station</th><th>Mode</th><th>Distance</th>
+        <th>Marche</th><th>Quai</th><th>Total</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="stations"></tbody>
+  </table>
+  <div class="row">
+    <label>Allure <input type="range" id="pace" min="0.6" max="1.6" step="0.05"></label>
+    <span class="pill" id="pace-val">×1.00</span>
+    <span class="src">1,00 = allure du routeur · plus bas = tu marches plus vite</span>
+    <button id="reroute">Recalculer les trajets</button>
+    <button id="pushnow">Envoyer à l'horloge</button>
+  </div>
+
+  <h2>LeVélo</h2>
+  <div class="cards" id="velo"></div>
+
+  <h2>Perturbations</h2>
+  <div id="alerts"></div>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+let fetchedAt = 0;
+
+const fmtLead = (s) => {
+  if (s === null || s === undefined) return "--";
+  if (s < 0) return "raté";
+  if (s < 60) return "GO";
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
+};
+const fmtMin = (s) => `${Math.floor(s / 60)}′${String(s % 60).padStart(2, "0")}`;
+const urgency = (s) => s < 60 ? "var(--now)" : s < 120 ? "var(--hurry)" : s < 300 ? "var(--soon)" : "var(--calm)";
+
+// Le serveur ne rafraîchit que toutes les quelques secondes : on interpole entre deux
+// réponses pour que le compte à rebours descende régulièrement.
+const drift = () => Math.floor((Date.now() - fetchedAt) / 1000);
+
+function render() {
+  if (!state) return;
+  const d = drift();
+
+  $("src").textContent = `source ${state.source}`;
+  $("src").className = "pill " + (state.source === "rbgl" || state.source === "spoti" ? "ok" : state.source === "gtfs" ? "warn" : "bad");
+  const ok = state.awtrix.enabled ? state.awtrix.last_push_ok : null;
+  $("clock-state").textContent = state.awtrix.enabled ? (ok === null ? "horloge —" : ok ? `horloge ${state.awtrix.host}` : "horloge injoignable") : "horloge désactivée";
+  $("clock-state").className = "pill " + (ok === true ? "ok" : ok === false ? "bad" : "");
+  $("now").textContent = new Date().toLocaleTimeString("fr-FR");
+
+  // Aperçu matrice
+  $("screens").innerHTML = state.boards.map(b => {
+    const lead = b.lead_s === null ? null : b.lead_s - d;
+    const value = lead === null ? "--" : (b.realtime ? "" : "~") + fmtLead(lead);
+    const color = lead === null ? "#4B5563" : urgency(lead).replace("var(--", "").replace(")", "");
+    const css = lead === null ? "#4B5563" : urgency(lead);
+    const pct = lead === null ? 0 : Math.max(0, Math.min(100, Math.round(100 * lead / 600)));
+    return `<div>
+      <div class="screen ${lead !== null && lead < 60 ? "blink" : ""}">
+        <span style="color:#${b.line_color}">${b.line}</span>&nbsp;<span style="color:${css}">${value}</span>
+        <div class="bar" style="width:${pct}%; background:${css}"></div>
+      </div>
+      <div class="screen-label">${b.station} → ${b.terminus || "?"}</div>
+    </div>`;
+  }).join("") + state.velo.map(v => `<div>
+      <div class="screen">
+        <span style="color:var(--${v.color === "22C55E" ? "calm" : v.color === "FB923C" ? "hurry" : "now"})">${v.bikes}</span><span style="color:#4B5563">v&nbsp;</span><span>${v.docks}</span><span style="color:#4B5563">b</span>
+      </div>
+      <div class="screen-label">${v.name}</div>
+    </div>`).join("");
+
+  if (!state.boards.length) $("screens").innerHTML = '<p class="empty">Aucun passage dans l\'horizon.</p>';
+
+  // Cartes de départ
+  $("boards").innerHTML = state.boards.map(b => {
+    const lead = b.lead_s === null ? null : b.lead_s - d;
+    const times = b.next.map(n => `<span class="${n.realtime ? "" : "theo"}">${n.at}</span>`).join(" · ");
+    return `<div class="card">
+      <div class="top">
+        <span class="line" style="color:#${b.line_color}">${b.line}</span>
+        <span class="terminus">${b.terminus || "?"}</span>
+      </div>
+      <div class="lead" style="color:${lead === null ? "var(--muted)" : urgency(lead)}">
+        ${lead === null ? "--" : fmtLead(lead)}${b.realtime ? "" : '<span class="theo" style="font-size:16px"> théo.</span>'}
+      </div>
+      <div class="breakdown">${b.station} · marche ${fmtMin(b.walk_s)} + quai ${b.access_s}s + prépa ${state.overhead_s}s</div>
+      <div class="times">passages : ${times || "—"}</div>
+    </div>`;
+  }).join("") || '<p class="empty">Rien à afficher.</p>';
+
+  // Stations
+  $("stations").innerHTML = state.stations.map(s => `<tr>
+      <td class="name">${s.name}</td>
+      <td>${s.modes}</td>
+      <td>${s.route_m} m<div class="src">${s.engine}</div></td>
+      <td>
+        <input type="number" min="0" step="10" value="${s.walk_source === "chrono" ? s.walk_s : ""}"
+               placeholder="${s.walk_s}" data-station="${s.name}" data-field="walk_s">
+        <div class="src">${s.walk_source}</div>
+      </td>
+      <td>
+        <input type="number" min="0" step="5" value="${s.access_source === "défaut" ? "" : s.access_s}"
+               placeholder="${s.access_s}" data-station="${s.name}" data-field="access_s">
+        <div class="src">${s.access_source}</div>
+      </td>
+      <td>${fmtMin(s.lead_s)}</td>
+      <td class="src">${s.quays} quais</td>
+    </tr>`).join("");
+
+  $("pace").value = state.pace_factor;
+  $("pace-val").textContent = "×" + Number(state.pace_factor).toFixed(2);
+
+  // Vélos
+  $("velo").innerHTML = state.velo.map(v => `<div class="card">
+      <div class="top"><span class="terminus" style="color:var(--text)">${v.name}</span></div>
+      <div class="lead" style="color:var(--calm)">${v.bikes}<span style="font-size:16px;color:var(--muted)"> vélos</span></div>
+      <div class="breakdown">${v.docks} bornes libres / ${v.capacity} · ${fmtMin(v.walk_s)} à pied${v.renting ? "" : " · station fermée"}</div>
+    </div>`).join("") || '<p class="empty">Aucune station dans le rayon.</p>';
+
+  // Perturbations
+  $("alerts").innerHTML = state.disruptions.map(a => `<div class="alert ${a.critical ? "" : "minor"}">
+      <div class="t">${a.title}</div>
+      <div class="c">${a.content}</div>
+    </div>`).join("") || '<p class="empty">Rien à signaler sur tes lignes.</p>';
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch("/api/state");
+    state = await resp.json();
+    fetchedAt = Date.now();
+    render();
+  } catch (e) { /* le service redémarre peut-être : on réessaiera */ }
+}
+
+async function post(url, body) {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  state = await resp.json();
+  fetchedAt = Date.now();
+  render();
+}
+
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.dataset && el.dataset.station) {
+    post("/api/calibration", {
+      station: el.dataset.station,
+      [el.dataset.field]: el.value === "" ? null : Number(el.value),
+    });
+  }
+});
+$("pace").addEventListener("change", (e) => post("/api/calibration", { pace_factor: Number(e.target.value) }));
+$("pace").addEventListener("input", (e) => { $("pace-val").textContent = "×" + Number(e.target.value).toFixed(2); });
+$("reroute").addEventListener("click", async (e) => {
+  e.target.disabled = true; e.target.textContent = "Calcul…";
+  await post("/api/reroute");
+  e.target.disabled = false; e.target.textContent = "Recalculer les trajets";
+});
+$("pushnow").addEventListener("click", () => fetch("/api/push", { method: "POST" }));
+
+refresh();
+setInterval(refresh, 5000);
+setInterval(render, 1000);
+</script>
+</body>
+</html>

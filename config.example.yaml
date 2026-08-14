@@ -1,0 +1,89 @@
+# Copier en config.yaml et adapter. Seuls home.lat/lon et awtrix.host sont obligatoires.
+
+home:
+  # Le point de départ : d'où tu pars à pied. C'est le réglage le plus important.
+  lat: 43.29517
+  lon: 5.38107
+  label: "Maison"
+
+walk:
+  # Moteur de routage piéton, interrogé une fois par station puis mis en cache :
+  #   valhalla  — tient compte du dénivelé, ce qui compte vraiment à Marseille
+  #   osrm      — plus rapide, terrain plat supposé
+  #   haversine — hors ligne, vol d'oiseau majoré (dernier recours)
+  engine: "valhalla"
+  # Ton allure par rapport à celle du routeur. Se règle depuis le dashboard.
+  pace_factor: 1.0
+  door_delay_s: 60       # sortir de l'appart, descendre l'escalier
+  margin_s: 30           # marge avant fermeture des portes
+  # Utilisés seulement par le repli haversine :
+  speed_mps: 1.30
+  detour_factor: 1.40
+
+transit:
+  radius_m: 900          # rayon de recherche des stations autour de home
+  route_types: [0, 1]    # 0 = tram, 1 = métro. Ajouter 3 pour les bus (base bien plus grosse)
+  max_lines: 4           # nombre d'apps « ligne » envoyées à l'horloge
+  horizon_min: 90        # au-delà, on considère qu'il n'y a plus de service
+  # Ne garder que certaines lignes, voire un seul sens :
+  #   lines: ["M1", "T2>Blancarde"]
+  lines: []
+  # Temps entre l'entrée de la station et le quai. Le dashboard écrit ses propres valeurs
+  # dans data/calibration.json et celles-ci ont priorité ; ce bloc sert de point de départ.
+  # Défauts par mode si rien n'est précisé : métro 90 s, tram 20 s, bus 10 s.
+  # Les noms doivent être ceux du GTFS, que `rtmpix stops` affiche tels quels.
+  # Attention : « Préfecture » s'appelle Estrangin dans les données.
+  access_s:
+    "La Rose": 30
+    "Saint-Just": 30
+    "Estrangin": 150
+    "Réformés Canebière": 150
+
+sources:
+  # rbgl  — api-mobilite.rbgl.fr : fusionne le temps réel SPOTI et le théorique, en JSON.
+  # spoti — api.rtm.fr : la source d'origine, en XML, à la minute près.
+  # gtfs  — horaires théoriques locaux, sans réseau.
+  # En cas d'échec, les autres sources prennent le relais dans cet ordre.
+  realtime: "rbgl"
+  rbgl_base: "https://api-mobilite.rbgl.fr/api/v1"
+  spoti_url: "https://api.rtm.fr/front/spoti/getStationDetails"
+  timeout_s: 8
+  user_agent: "rtmpix/0.1 (horloge perso)"
+
+disruptions:
+  enabled: true
+  refresh_s: 300
+  only_my_lines: true    # ne montrer que les perturbations des lignes affichées
+  critical_only: false
+
+velo:
+  enabled: true
+  radius_m: 700
+  stations: 1            # nombre de stations LeVélo affichées
+
+awtrix:
+  enabled: true
+  host: "192.168.1.42"   # IP de l'Ulanzi TC001
+  timeout_s: 5
+  app_prefix: "rtm"      # les apps s'appelleront rtm_m1_four, rtm_velo_...
+  duration_s: 8          # durée d'affichage de chaque app dans la boucle
+  lifetime_s: 180        # sans mise à jour pendant ce délai, l'app se signale puis disparaît
+
+web:
+  enabled: true
+  host: "0.0.0.0"        # dashboard sans authentification : à garder sur le réseau local
+  port: 8723
+
+refresh:
+  departures_s: 30       # interrogation des sources temps réel
+  push_s: 10             # réémission vers l'horloge
+  velo_s: 60
+  gtfs_check_hour: 4     # heure du contrôle quotidien de fraîcheur du GTFS
+
+gtfs:
+  url: "https://app.mecatran.com/utw/ws/gtfsfeed/static/mamp-rtm?apiKey=16421b08630a7d065c6d250051780f484b673659"
+  data_dir: "./data"
+
+velo_gbfs:
+  station_information: "https://gbfs.omega.fifteen.eu/gbfs/2.2/marseille/en/station_information.json"
+  station_status: "https://gbfs.omega.fifteen.eu/gbfs/2.2/marseille/en/station_status.json"

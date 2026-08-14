@@ -1,0 +1,10 @@
+# Configuration locale : contient l'adresse du domicile et l'IP de l'horloge.
+config.yaml
+
+# Données générées : base GTFS, cache de routage, calibrations mesurées.
+data/
+
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
