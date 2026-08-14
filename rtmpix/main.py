@@ -132,6 +132,14 @@ def cmd_journey(cfg, args) -> int:
         for pattern in journey.patterns:
             print(f"    {pattern.label:<12} ~{pattern.total_s // 60:>2}′  {pattern.describe()}")
 
+        if journey.now_plans:
+            print("\n  En partant maintenant :")
+            for rank, plan in enumerate(journey.now_plans[: cfg.journeys.max_options]):
+                duration = int((plan.arrive_at - plan.leave_at).total_seconds())
+                marker = "→" if rank == 0 else " "
+                print(f"  {marker} {plan.pattern.label:<10} arrivée {plan.arrive_at:%H:%M} "
+                      f"({duration // 60}′ porte à porte, {plan.board_at:%H:%M} au départ)")
+
         if journey.course is None:
             print("\n  Aucun cours à venir (agenda absent, vide, ou terminé).")
             if args.at:
@@ -158,7 +166,10 @@ def _print_plans(service, journey, arrive_by, cfg, now, precomputed=None) -> Non
         plans = [
             p
             for p in (
-                planner.latest_departure(service.conn, pat, arrive_by, cfg.walk.overhead_s)
+                planner.latest_departure(
+                    service.conn, pat, arrive_by, cfg.walk.overhead_s,
+                    punctuality=service.punctuality,
+                )
                 for pat in journey.patterns
             )
             if p is not None
@@ -268,6 +279,9 @@ def cmd_run(cfg, args) -> int:
                 and last_gtfs_check != today.date()
             ):
                 last_gtfs_check = today.date()
+                removed = service.punctuality.purge()
+                if removed:
+                    log.info("Ponctualité : %d observations trop anciennes effacées.", removed)
                 if gtfs.ensure_db(cfg):
                     log.info("Nouveau GTFS, rechargement.")
                     service.conn = gtfs.Database(cfg.db_path)

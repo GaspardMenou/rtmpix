@@ -42,9 +42,19 @@ class Departure:
     when: datetime
     realtime: bool
     color: str | None = None
+    # Horaire théorique du même passage. Son écart avec `when` est la ponctualité observée,
+    # que l'on accumule pour en déduire des marges mesurées (voir reliability.py).
+    aimed: datetime | None = None
 
     def seconds_from(self, now: datetime) -> int:
         return int((self.when - now).total_seconds())
+
+    @property
+    def deviation_s(self) -> int | None:
+        """Écart au théorique : positif en retard, négatif en avance."""
+        if self.aimed is None or not self.realtime:
+            return None
+        return int((self.when - self.aimed).total_seconds())
 
 
 class RealtimeError(Exception):
@@ -123,15 +133,13 @@ class RbglProvider(Provider):
         out = []
         for dep in payload.get("departures") or []:
             expected = dep.get("ExpectedDepartureTime")
-            stamp = expected or dep.get("AimedDepartureTime")
+            aimed_raw = dep.get("AimedDepartureTime")
+            stamp = expected or aimed_raw
             if not stamp:
                 continue
-            try:
-                when = datetime.fromisoformat(stamp)
-            except ValueError:
+            when = _parse_stamp(stamp)
+            if when is None:
                 continue
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=PARIS)
             out.append(
                 Departure(
                     station=station.name,
@@ -140,6 +148,7 @@ class RbglProvider(Provider):
                     when=when,
                     realtime=expected is not None,
                     color=(dep.get("color") or "").strip() or None,
+                    aimed=_parse_stamp(aimed_raw) if aimed_raw else None,
                 )
             )
         return out
@@ -286,6 +295,24 @@ def _hhmm_to_datetime(hhmm: str, now: datetime) -> datetime | None:
     if when < now - timedelta(minutes=5):
         when += timedelta(days=1)
     return when
+
+
+def _parse_stamp(stamp: str) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=PARIS)
+
+
+def route_types_by_line(conn: sqlite3.Connection) -> dict[str, int]:
+    """short_name -> route_type, pour rattacher un passage temps réel à son mode."""
+    return {
+        row["short_name"]: row["route_type"]
+        for row in conn.execute(
+            "SELECT short_name, route_type FROM routes WHERE short_name IS NOT NULL"
+        )
+    }
 
 
 def route_colors(conn: sqlite3.Connection) -> dict[str, str]:

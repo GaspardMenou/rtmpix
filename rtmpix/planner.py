@@ -44,6 +44,7 @@ class Leg:
     headsign: str = ""
     typical_s: int = 0      # temps de parcours médian
     daily_runs: int = 0     # nombre de courses, pour départager les itinéraires
+    route_type: int | None = None   # mode GTFS : détermine la marge de fiabilité par défaut
 
 
 @dataclass
@@ -96,18 +97,44 @@ def _load_stops(db) -> dict[str, tuple[str, float, float]]:
     }
 
 
-def _stops_within(stops, lat: float, lon: float, radius_m: int) -> list[tuple[str, float]]:
-    out = []
-    for stop_id, (_, slat, slon) in stops.items():
+def _stops_within(
+    stops, lat: float, lon: float, radius_m: int, max_stations: int | None = None
+) -> list[tuple[str, float]]:
+    """Quais dans un rayon, éventuellement plafonnés par nombre d'arrêts distincts.
+
+    Le plafond doit porter sur les arrêts, pas sur les quais : « Technopôle Centrale Med »
+    compte deux quais, un par sens. Compter les quais reviendrait à ne retenir que six
+    arrêts sur quinze, et à écarter en silence des lignes parfaitement utilisables.
+    """
+    by_station: dict[str, list[tuple[str, float]]] = {}
+    for stop_id, (name, slat, slon) in stops.items():
         distance = haversine_m(lat, lon, slat, slon)
         if distance <= radius_m:
-            out.append((stop_id, distance))
+            by_station.setdefault(name, []).append((stop_id, distance))
+
+    # Les arrêts les plus proches d'abord, chacun avec tous ses quais.
+    ordered = sorted(by_station.items(), key=lambda kv: min(d for _, d in kv[1]))
+    if max_stations is not None:
+        ordered = ordered[:max_stations]
+
+    out = [pair for _, quays in ordered for pair in quays]
     out.sort(key=lambda x: x[1])
     return out
 
 
+_LEG_STATS_CACHE: dict[tuple, tuple[int, int]] = {}
+
+
 def _leg_stats(db, route_id: str, direction_id: int, from_stop: str, to_stop: str) -> tuple[int, int]:
-    """Temps de parcours médian et nombre de courses, pour départager les itinéraires."""
+    """Temps de parcours médian et nombre de courses, pour départager les itinéraires.
+
+    Mis en cache : l'énumération des correspondances repose sur les mêmes tronçons des
+    centaines de fois, et chaque appel balaie tous les horaires de la ligne.
+    """
+    key = (route_id, direction_id, from_stop, to_stop)
+    if key in _LEG_STATS_CACHE:
+        return _LEG_STATS_CACHE[key]
+
     rows = db.execute(
         """
         SELECT s2.arrival_s - s1.departure_s AS d
@@ -119,30 +146,38 @@ def _leg_stats(db, route_id: str, direction_id: int, from_stop: str, to_stop: st
         (from_stop, to_stop, route_id, direction_id),
     ).fetchall()
     durations = sorted(r["d"] for r in rows if r["d"] and r["d"] > 0)
-    if not durations:
-        return 0, 0
-    return durations[len(durations) // 2], len(durations)
+    stats = (durations[len(durations) // 2], len(durations)) if durations else (0, 0)
+    _LEG_STATS_CACHE[key] = stats
+    return stats
 
 
 def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]:
     """Itinéraires domicile → destination, directs ou avec une correspondance."""
     stops = _load_stops(db)
 
-    origins = _stops_within(stops, origin["lat"], origin["lon"], cfg.transit.radius_m)
+    # Le plafond porte sur les arrêts et non sur les quais : une destination desservie par
+    # « Technopôle Centrale Med » ET « Einstein Monnet » doit voir les deux, avec toutes
+    # les lignes qui s'y arrêtent.
+    origins = _stops_within(
+        stops, origin["lat"], origin["lon"], cfg.transit.radius_m,
+        max_stations=cfg.journeys.max_origin_stations,
+    )
     dests = _stops_within(
         stops,
         destination["lat"],
         destination["lon"],
         destination.get("radius_m") or cfg.journeys.destination_radius_m,
+        max_stations=cfg.journeys.max_dest_stations,
     )
     if not origins or not dests:
         log.warning("Aucun arrêt autour du domicile ou de la destination.")
         return []
 
-    # On plafonne le nombre d'arrêts candidats : au-delà, on énumère des itinéraires que
-    # personne n'emprunterait, et chacun coûte des requêtes de routage.
-    origins = origins[: cfg.journeys.max_origin_stops]
-    dests = dests[: cfg.journeys.max_dest_stops]
+    log.info(
+        "  %d quais au départ (%d arrêts), %d à l'arrivée (%d arrêts)",
+        len(origins), len({stops[s][0] for s, _ in origins}),
+        len(dests), len({stops[s][0] for s, _ in dests}),
+    )
     origin_ids = {s for s, _ in origins}
     dest_ids = {s for s, _ in dests}
 
@@ -168,7 +203,7 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
     direct = db.execute(
         f"""
         SELECT a.route_id, a.direction_id, a.stop_id AS o, b.stop_id AS d,
-               r.short_name, r.color
+               r.short_name, r.color, r.route_type
         FROM route_stops a
         JOIN route_stops b
           ON b.route_id = a.route_id AND b.direction_id = a.direction_id AND b.seq > a.seq
@@ -188,6 +223,7 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
             from_stop=row["o"], from_name=stops[row["o"]][0],
             to_stop=row["d"], to_name=stops[row["d"]][0],
             color=row["color"], typical_s=typical, daily_runs=runs,
+            route_type=row["route_type"],
         )
         patterns.append(
             Pattern(
@@ -258,27 +294,35 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
                 if not runs1 or not runs2:
                     continue
 
-                r1 = db.execute("SELECT short_name, color FROM routes WHERE route_id = ?",
-                                (first["route_id"],)).fetchone()
-                r2 = db.execute("SELECT short_name, color FROM routes WHERE route_id = ?",
-                                (second["route_id"],)).fetchone()
+                r1 = db.execute(
+                    "SELECT short_name, color, route_type FROM routes WHERE route_id = ?",
+                    (first["route_id"],)).fetchone()
+                r2 = db.execute(
+                    "SELECT short_name, color, route_type FROM routes WHERE route_id = ?",
+                    (second["route_id"],)).fetchone()
 
+                # Une correspondance coûte un temps fixe — descendre du véhicule, sortir,
+                # s'orienter — PLUS la marche jusqu'à l'arrêt de reprise. Les additionner
+                # est ce qui distingue l'arrêt en face de la sortie d'un arrêt situé deux
+                # rues plus loin ; les confondre faisait préférer un arrêt éloigné au seul
+                # motif qu'il économise une station de bus.
                 transfer_walk = walk_seconds(distance, cfg.walk.speed_mps, cfg.walk.detour_factor)
-                transfer = max(cfg.journeys.min_transfer_s, transfer_walk)
                 station_name = stops[first["x"]][0]
                 override = calibration.transfer.get(station_name)
-                if override is not None:
-                    transfer = int(override)
+                fixed = int(override) if override is not None else cfg.journeys.min_transfer_s
+                transfer = fixed + transfer_walk
 
                 patterns.append(
                     Pattern(
                         legs=[
                             Leg(first["route_id"], r1["short_name"] or "?", first["direction_id"],
                                 first["o"], stops[first["o"]][0], first["x"], x_name,
-                                r1["color"], typical_s=t1, daily_runs=runs1),
+                                r1["color"], typical_s=t1, daily_runs=runs1,
+                                route_type=r1["route_type"]),
                             Leg(second["route_id"], r2["short_name"] or "?", second["direction_id"],
                                 y_stop, stops[y_stop][0], second["d"], stops[second["d"]][0],
-                                r2["color"], typical_s=t2, daily_runs=runs2),
+                                r2["color"], typical_s=t2, daily_runs=runs2,
+                                route_type=r2["route_type"]),
                         ],
                         walk_in_s=walk_to(first["o"], origin["lat"], origin["lon"]),
                         walk_out_s=walk_from(second["d"], destination["lat"], destination["lon"]),
@@ -294,7 +338,7 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
         return p.total_s + wait
 
     patterns.sort(key=score)
-    kept = _dedupe(patterns, cfg.journeys.max_options)
+    kept = _dedupe(patterns, cfg.journeys.max_patterns)
 
     # Seulement maintenant : la marche réelle par les rues, pour les itinéraires retenus.
     for p in kept:
@@ -415,45 +459,72 @@ def _first_departure_after(db, leg: Leg, earliest: datetime) -> tuple[datetime, 
     return best
 
 
-def latest_departure(db, pattern: Pattern, arrive_by: datetime, overhead_s: int) -> Plan | None:
+def _margins(punctuality, leg: Leg) -> tuple[int, int]:
+    """(retard à absorber, avance à anticiper) pour un tronçon, en secondes."""
+    if punctuality is None:
+        return 0, 0
+    return punctuality.margins(leg.line, leg.route_type)
+
+
+def latest_departure(
+    db, pattern: Pattern, arrive_by: datetime, overhead_s: int, punctuality=None
+) -> Plan | None:
     """La dernière minute pour sortir de chez soi sans arriver en retard.
 
     Calcul à rebours : on part de l'heure d'arrivée voulue, on retire la marche finale,
     on cherche la dernière course qui arrive à temps, on remonte de correspondance en
     correspondance jusqu'à la porte de l'appartement.
+
+    Deux marges mesurées s'y ajoutent, et elles ne jouent pas au même endroit : un véhicule
+    peut **arriver en retard** — on vise donc une course plus tôt —, et il peut aussi
+    **partir en avance**, auquel cas on le rate depuis le trottoir : on se présente au quai
+    d'autant plus tôt. Un bus cumule les deux, un métro presque aucun.
     """
     cursor = arrive_by - timedelta(seconds=pattern.walk_out_s)
     timed: list[tuple[datetime, datetime]] = []
 
     for index in range(len(pattern.legs) - 1, -1, -1):
         leg = pattern.legs[index]
-        found = _last_arrival_before(db, leg, cursor)
+        late_s, early_s = _margins(punctuality, leg)
+
+        found = _last_arrival_before(db, leg, cursor - timedelta(seconds=late_s))
         if found is None:
             return None
         timed.insert(0, found)
-        cursor = found[0]
+        cursor = found[0] - timedelta(seconds=early_s)
         if index > 0:
             cursor -= timedelta(seconds=pattern.transfers_s[index - 1])
 
     board_at = timed[0][0]
-    leave_at = board_at - timedelta(seconds=pattern.walk_in_s + overhead_s)
+    first_early = _margins(punctuality, pattern.legs[0])[1]
+    leave_at = board_at - timedelta(seconds=pattern.walk_in_s + overhead_s + first_early)
     arrive_at = timed[-1][1] + timedelta(seconds=pattern.walk_out_s)
     return Plan(pattern, leave_at, board_at, arrive_at, timed)
 
 
-def earliest_arrival(db, pattern: Pattern, leave_at: datetime, overhead_s: int) -> Plan | None:
-    """En partant à `leave_at`, à quelle heure on arrive au plus tôt."""
+def earliest_arrival(
+    db, pattern: Pattern, leave_at: datetime, overhead_s: int, punctuality=None
+) -> Plan | None:
+    """En partant à `leave_at`, à quelle heure on arrive au plus tôt.
+
+    L'avance possible du véhicule est prise en compte — être au quai à l'heure pile ne
+    suffit pas si le bus passe deux minutes avant — ainsi que son retard sur les
+    correspondances. L'heure d'arrivée annoncée reste celle de l'horaire : la majorer du
+    retard donnerait une estimation systématiquement pessimiste.
+    """
     cursor = leave_at + timedelta(seconds=overhead_s + pattern.walk_in_s)
     timed: list[tuple[datetime, datetime]] = []
 
     for index, leg in enumerate(pattern.legs):
-        found = _first_departure_after(db, leg, cursor)
+        late_s, early_s = _margins(punctuality, leg)
+        found = _first_departure_after(db, leg, cursor + timedelta(seconds=early_s))
         if found is None:
             return None
         timed.append(found)
         cursor = found[1]
         if index < len(pattern.transfers_s):
-            cursor += timedelta(seconds=pattern.transfers_s[index])
+            # Sur une correspondance, le retard du véhicule précédent se paie comptant.
+            cursor += timedelta(seconds=pattern.transfers_s[index] + late_s)
 
     arrive_at = timed[-1][1] + timedelta(seconds=pattern.walk_out_s)
     return Plan(pattern, leave_at, timed[0][0], arrive_at, timed)

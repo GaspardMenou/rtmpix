@@ -165,6 +165,18 @@
   <h2>LeVélo</h2>
   <div class="cards" id="velo"></div>
 
+  <h2>Ponctualité mesurée</h2>
+  <p class="hint">
+    Écart observé entre l'horaire annoncé et l'horaire réel, ligne par ligne. Le
+    <strong>retard p80</strong> est absorbé par le calcul d'itinéraire ; l'<strong>avance</strong>
+    fait arriver au quai plus tôt, faute de quoi on regarde le bus passer. En dessous de
+    20 relevés, la mesure est trop fragile et c'est la marge du mode qui s'applique.
+  </p>
+  <table>
+    <thead><tr><th>Ligne</th><th>Relevés</th><th>Écart médian</th><th>Retard p80</th><th>Avance</th><th>Marge appliquée</th></tr></thead>
+    <tbody id="punctuality"></tbody>
+  </table>
+
   <h2>Perturbations</h2>
   <div id="alerts"></div>
 
@@ -210,11 +222,16 @@ function render() {
         <a class="eink-link" href="/eink.png" target="_blank">aperçu e-ink ↗</a>
       </div>`;
 
+    // Indépendant de toute échéance : le plus rapide si on part tout de suite.
+    const nowList = (j.fastest_now || []).map((o, i) => `<span>${i === 0 ? "→ " : ""}<strong>${o.label}</strong> arrivée ${o.arrive_at} (${fmtMin(o.duration_s)} porte à porte)</span>`).join(" ");
+    const nowBlock = nowList ? `<div class="alts">en partant maintenant : ${nowList}</div>` : "";
+
     if (!dl || !opt) {
       const next = (j.upcoming || []).slice(0, 3)
         .map(c => `<span>${c.start} · ${c.summary}</span>`).join(" ");
       return `<div class="journey">${head}
         <div class="empty">${j.has_calendar ? "Rien de planifié pour l'instant." : "Pas d'agenda configuré pour cette destination."}</div>
+        ${nowBlock}
         ${next ? `<div class="alts">${next}</div>` : ""}</div>`;
     }
 
@@ -256,6 +273,7 @@ function render() {
           <span class="src">temps réel pour descendre du ${opt.legs[i].line} et rejoindre le ${opt.legs[i + 1].line}</span>
         </div>`).join("")}
       ${alts ? `<div class="alts">sinon : ${alts}</div>` : ""}
+      ${nowBlock}
     </div>`;
   }).join("");
 
@@ -327,6 +345,17 @@ function render() {
       <div class="lead" style="color:var(--calm)">${v.bikes}<span style="font-size:16px;color:var(--muted)"> vélos</span></div>
       <div class="breakdown">${v.docks} bornes libres / ${v.capacity} · ${fmtMin(v.walk_s)} à pied${v.renting ? "" : " · station fermée"}</div>
     </div>`).join("") || '<p class="empty">Aucune station dans le rayon.</p>';
+
+  // Ponctualité
+  const fmtDev = (s) => (s > 0 ? "+" : "") + s + " s";
+  $("punctuality").innerHTML = (state.punctuality || []).map(p => `<tr>
+      <td class="name">${p.line}</td>
+      <td>${p.samples}</td>
+      <td style="color:${p.median_s > 60 ? "var(--hurry)" : p.median_s > 15 ? "var(--soon)" : "var(--calm)"}">${fmtDev(p.median_s)}</td>
+      <td>${p.late_s} s</td>
+      <td>${p.early_s} s</td>
+      <td class="src">${p.measured ? "mesurée" : "défaut du mode"}</td>
+    </tr>`).join("") || '<tr><td colspan="6" class="src">Aucun relevé pour l\'instant : les mesures s\'accumulent au fil des rafraîchissements.</td></tr>';
 
   // Perturbations
   $("alerts").innerHTML = state.disruptions.map(a => `<div class="alert ${a.critical ? "" : "minor"}">

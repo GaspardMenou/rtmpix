@@ -17,7 +17,8 @@ from .awtrix import Awtrix
 from .calibration import Calibration
 from .departures import build_boards
 from .disruptions import DisruptionClient, relevant
-from .realtime import PARIS, RealtimeService
+from .realtime import PARIS, RealtimeService, route_types_by_line
+from .reliability import Punctuality
 from .routing import WalkRouter
 from .schedule import Course, ScheduleClient
 from .velo import VeloClient
@@ -34,11 +35,17 @@ class JourneyState:
     schedule: ScheduleClient | None = None
     course: Course | None = None
     plans: list = field(default_factory=list)
+    now_plans: list = field(default_factory=list)
 
     @property
     def best(self):
         """L'itinéraire qui laisse partir le plus tard — la réponse à « j'ai jusqu'à quand ? »."""
         return self.plans[0] if self.plans else None
+
+    @property
+    def fastest(self):
+        """Le plus rapide en partant tout de suite, quelle que soit l'échéance."""
+        return self.now_plans[0] if self.now_plans else None
 
 
 class Service:
@@ -50,6 +57,8 @@ class Service:
         self.conn = gtfs.Database(cfg.db_path)
         self.router = WalkRouter(cfg, cfg.routing_cache_path)
         self.realtime = RealtimeService(cfg, self.conn)
+        self.punctuality = Punctuality(cfg.punctuality_path, cfg)
+        self.route_types = route_types_by_line(self.conn)
         self.velo_client = VeloClient(cfg) if cfg.velo.enabled else None
         self.disruption_client = DisruptionClient(cfg) if cfg.disruptions.enabled else None
         self.awtrix = Awtrix(cfg) if cfg.awtrix.enabled else None
@@ -176,7 +185,8 @@ class Service:
                 arrive_by = course.start - margin
                 for pattern in journey.patterns:
                     plan = planner.latest_departure(
-                        self.conn, pattern, arrive_by, self.cfg.walk.overhead_s
+                        self.conn, pattern, arrive_by, self.cfg.walk.overhead_s,
+                        punctuality=self.punctuality,
                     )
                     if plan is not None:
                         plans.append(plan)
@@ -190,18 +200,43 @@ class Service:
                         p.arrive_at.timestamp(),
                     )
                 )
+            # Indépendamment de toute échéance : en partant maintenant, quel itinéraire
+            # arrive le plus tôt ? Plusieurs lignes desservent souvent la même destination
+            # par des arrêts différents, et la plus rapide change au fil de la journée.
+            now_plans = []
+            for pattern in journey.patterns:
+                plan = planner.earliest_arrival(
+                    self.conn, pattern, now, self.cfg.walk.overhead_s,
+                    punctuality=self.punctuality,
+                )
+                if plan is not None:
+                    now_plans.append(plan)
+            now_plans.sort(key=lambda p: (p.arrive_at, p.pattern.walk_in_s + p.pattern.walk_out_s))
+
             with self.lock:
                 journey.course = course
                 journey.plans = plans
+                journey.now_plans = now_plans
 
     # ----------------------------------------------------------------- sources
 
     def refresh_departures(self) -> None:
         now = datetime.now(PARIS)
         departures = self.realtime.fetch(self.stations)
+        self._record_punctuality(departures)
         with self.lock:
             self.boards = build_boards(departures, self.stations, self.cfg, now)
             self.last_departures_at = now
+
+    def _record_punctuality(self, departures) -> None:
+        """Chaque passage annoncé en temps réel documente la ponctualité de sa ligne."""
+        observations = [
+            (dep.line, self.route_types.get(dep.line), dep.aimed, dep.deviation_s)
+            for dep in departures
+            if dep.deviation_s is not None
+        ]
+        if observations:
+            self.punctuality.record(observations)
 
     def refresh_velo(self) -> None:
         if self.velo_client is None:
@@ -341,6 +376,20 @@ class Service:
                     for d in self.disruptions
                 ],
                 "journeys": [self._journey_snapshot(j, now) for j in self.journeys],
+                "punctuality": [
+                    {
+                        "line": s.line,
+                        "samples": s.samples,
+                        "median_s": s.median_s,
+                        "late_s": s.late_s,
+                        "early_s": s.early_s,
+                        "measured": s.samples >= self.cfg.reliability.min_samples,
+                    }
+                    for s in sorted(
+                        self.punctuality.stats().values(),
+                        key=lambda x: (-x.samples, x.line),
+                    )[:12]
+                ],
             }
 
     def _journey_snapshot(self, journey: JourneyState, now: datetime) -> dict:
@@ -372,6 +421,28 @@ class Service:
                 else []
             ),
             "deadline": screen,
+            "fastest_now": [
+                {
+                    "label": plan.pattern.label,
+                    "leave_at": plan.leave_at.strftime("%H:%M"),
+                    "board_at": plan.board_at.strftime("%H:%M"),
+                    "arrive_at": plan.arrive_at.strftime("%H:%M"),
+                    "duration_s": int((plan.arrive_at - plan.leave_at).total_seconds()),
+                    "walk_s": plan.pattern.walk_in_s + plan.pattern.walk_out_s,
+                    "legs": [
+                        {
+                            "line": leg.line,
+                            "color": leg.color,
+                            "from": leg.from_name,
+                            "to": leg.to_name,
+                            "dep": timed[0].strftime("%H:%M"),
+                            "arr": timed[1].strftime("%H:%M"),
+                        }
+                        for leg, timed in zip(plan.pattern.legs, plan.legs, strict=True)
+                    ],
+                }
+                for plan in journey.now_plans[: self.cfg.journeys.max_options]
+            ],
             "options": [
                 {
                     "label": plan.pattern.label,
@@ -395,7 +466,7 @@ class Service:
                         for leg, timed in zip(plan.pattern.legs, plan.legs, strict=True)
                     ],
                 }
-                for plan in journey.plans
+                for plan in journey.plans[: self.cfg.journeys.max_options]
             ],
             "patterns": [
                 {"label": p.label, "describe": p.describe(), "total_s": p.total_s}

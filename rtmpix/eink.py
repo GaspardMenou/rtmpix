@@ -164,6 +164,14 @@ def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
             c.text((margin, y + 4), "sinon : " + " · ".join(
                 f"{o['label']} pars {o['leave_at']}" for o in others
             ), size=13, max_w=right_col_x - margin - 20)
+            y += 22
+        # Et si on part tout de suite, sans attendre l'échéance.
+        fastest = (active.get("fastest_now") or [])[:1]
+        if fastest:
+            f = fastest[0]
+            c.text((margin, y + 4),
+                   f"maintenant : {f['label']} → {f['arrive_at']} ({f['duration_s'] // 60}′)",
+                   size=13, max_w=right_col_x - margin - 20)
 
     elif journeys:
         c.text((margin, y), "Aucun cours à venir", size=30, bold=True)

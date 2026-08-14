@@ -107,7 +107,11 @@ journeys:
   destination_radius_m: 600
   transfer_radius_m: 350   # au-delà, ce n'est plus une correspondance
   min_transfer_s: 120      # plancher : descendre, traverser, trouver le bon quai
-  max_options: 3           # itinéraires alternatifs gardés comme plan B
+  max_patterns: 8          # itinéraires gardés pour le calcul horaire
+  max_options: 3           # itinéraires présentés à l'écran
+  max_origin_stations: 8   # plafonds exprimés en ARRÊTS, pas en quais : un arrêt en
+  max_dest_stations: 8     # compte souvent deux, et une école peut être desservie
+                           # par plusieurs arrêts aux lignes différentes
   arrive_margin_s: 300     # être sur place cinq minutes avant le début du cours
   show_window_min: 150     # au-delà, le compte à rebours n'apparaît pas sur l'horloge
   calendar_refresh_s: 1800
@@ -120,6 +124,27 @@ journeys:
       calendar: ""
       # Ne garder que les séances dont le lieu ou l'intitulé contient ce texte :
       location_filter: ""
+
+# ---------------------------------------------------------------------------
+# Marges de sécurité, mesurées plutôt que supposées.
+#
+# Un bus n'est pas un métro : il subit le trafic. Plutôt qu'une constante au jugé, rtmpix
+# compare en continu l'horaire annoncé et l'horaire réel de chaque passage, et en déduit
+# deux marges par ligne, qui ne jouent pas au même endroit :
+#   - le RETARD  → on vise une course plus tôt, pour arriver quand même à l'heure ;
+#   - l'AVANCE   → on se présente au quai plus tôt, sinon on regarde le bus passer.
+# Relevés réels à Marseille : tram T2 +15 s de médiane, bus 7B +146 s, bus 7 +182 s.
+# ---------------------------------------------------------------------------
+reliability:
+  enabled: true
+  percentile: 80         # on couvre 80 % des cas ; monter à 90 élargit les deux marges
+  min_samples: 20        # en deçà, la mesure est trop fragile : on garde le défaut du mode
+  retention_days: 30
+  default_margin_s:      # marges par mode GTFS tant qu'une ligne manque de relevés
+    0: 60                # tram
+    1: 30                # métro
+    3: 150               # bus
+    4: 120               # navette maritime
 
 # ---------------------------------------------------------------------------
 # Écran e-ink 7,5″ (TRMNL, XIAO ePaper Panel…), 800×480.

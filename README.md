@@ -88,6 +88,37 @@ règle au chronomètre depuis le dashboard — c'est souvent lui qui décide. Ex
 en passant la correspondance de 120 s à 240 s, le B3 tient toujours 07:21 (il passe toutes
 les 2 min), mais les lignes 1 et 142 reculent à 07:14.
 
+## Plusieurs itinéraires, et la fiabilité de chacun
+
+Une destination est rarement desservie par un seul arrêt. Centrale Méditerranée a
+*Technopôle Centrale Med* à 150 m (B3 seul) et *Einstein Monnet* à 270 m (lignes 1, 62,
+142) — sans compter les variantes au départ. rtmpix énumère tout, garde huit itinéraires
+candidats et répond à **deux questions différentes** :
+
+| Question | Réponse |
+|---|---|
+| Le plus rapide en partant maintenant | `M1 › B3`, arrivée 19:56, 35′ porte à porte |
+| Le plus tard sans être en retard | `42 › B3`, pars à 07:23 |
+
+Ce ne sont pas les mêmes itinéraires, et c'est normal : partir au plus tard et arriver au
+plus vite sont deux optimisations distinctes.
+
+**Un bus n'est pas un métro.** Plutôt qu'une constante au jugé, rtmpix mesure : l'API
+fournit pour chaque passage l'horaire annoncé *et* l'horaire réel, et leur écart est la
+ponctualité du moment. Relevés à Marseille :
+
+| Ligne | Mode | Écart médian |
+|---|---|---:|
+| T2 | tram | **+15 s** |
+| 7B | bus | **+146 s** |
+| 7 | bus | **+182 s** |
+
+Ces écarts alimentent deux marges par ligne, qui ne jouent pas au même endroit : le
+**retard** fait viser une course plus tôt, l'**avance** fait arriver au quai plus tôt —
+c'est elle qui fait rater un bus depuis le trottoir. Une course n'est comptée qu'une fois
+même si elle est vue à chaque rafraîchissement, et sous 20 relevés la marge du mode
+s'applique. Le tout est visible et réglable dans le dashboard.
+
 ## Écran e-ink
 
 Le service produit aussi une image 800×480 pour un panneau e-ink 7,5″ (TRMNL, XIAO ePaper

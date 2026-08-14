@@ -101,6 +101,46 @@ def test_latest_departure_impossible_hors_calendrier(db):
     assert plan is None
 
 
+def test_stops_within_plafonne_les_arrets_pas_les_quais():
+    """Un arrêt vaut souvent deux quais : plafonner les quais amputerait le choix."""
+    from rtmpix.planner import _stops_within
+
+    stops = {
+        "a1": ("Alpha", 43.300, 5.400),
+        "a2": ("Alpha", 43.3001, 5.4001),
+        "b1": ("Beta", 43.3005, 5.4005),
+        "b2": ("Beta", 43.3006, 5.4006),
+        "c1": ("Gamma", 43.301, 5.401),
+    }
+    found = _stops_within(stops, 43.300, 5.400, 5000, max_stations=2)
+    names = {stops[s][0] for s, _ in found}
+    # Deux arrêts demandés : on doit obtenir leurs quatre quais, pas deux quais.
+    assert names == {"Alpha", "Beta"}
+    assert len(found) == 4
+
+
+def test_earliest_arrival_enchaine_la_correspondance(db):
+    from rtmpix.planner import earliest_arrival
+
+    pattern = Pattern(
+        legs=[
+            Leg("R_METRO", "M9", 0, "S_HOME", "Départ", "S_HUB_M", "Le Hub"),
+            Leg("R_BUS", "B9", 0, "S_HUB_B", "Métro Le Hub", "S_DEST", "Arrivée"),
+        ],
+        walk_in_s=300,
+        walk_out_s=120,
+        transfers_s=[180],
+    )
+    leave = datetime(2026, 8, 17, 6, 0, tzinfo=PARIS)
+    plan = earliest_arrival(db, pattern, leave, overhead_s=90)
+    assert plan is not None
+    # On ne peut pas embarquer avant d'avoir marché et s'être préparé.
+    assert plan.legs[0][0] >= leave + timedelta(seconds=300 + 90)
+    # Le bus part après l'arrivée du métro, correspondance comprise.
+    assert (plan.legs[1][0] - plan.legs[0][1]).total_seconds() >= 180
+    assert plan.arrive_at == plan.legs[-1][1] + timedelta(seconds=120)
+
+
 def test_latest_departure_prend_bien_le_dernier(db):
     pattern = Pattern(
         legs=[Leg("R_METRO", "M9", 0, "S_HOME", "Départ", "S_HUB_M", "Le Hub")],
@@ -111,6 +151,94 @@ def test_latest_departure_prend_bien_le_dernier(db):
     plan = latest_departure(db, pattern, datetime(2026, 8, 17, 6, 45, tzinfo=PARIS), 0)
     assert plan is not None
     assert plan.legs[0][1] == datetime(2026, 8, 17, 6, 40, tzinfo=PARIS)
+
+
+# -------------------------------------------------------------- ponctualité
+
+def _punctuality(tmp_path, **overrides):
+    from rtmpix.config import Reliability
+    from rtmpix.reliability import Punctuality
+
+    class Cfg:
+        reliability = Reliability(**overrides)
+
+    return Punctuality(tmp_path / "p.sqlite", Cfg())
+
+
+def test_ponctualite_ne_compte_une_course_qu_une_fois(tmp_path):
+    """Le même passage est revu à chaque rafraîchissement : il ne doit peser qu'une fois."""
+    p = _punctuality(tmp_path)
+    aimed = datetime(2026, 8, 17, 8, 0, tzinfo=PARIS)
+    p.record([("B3", 3, aimed, 60)])
+    p.record([("B3", 3, aimed, 90)])  # relevé plus tardif de la MÊME course
+    stats = p.stats(refresh=True)["B3"]
+    assert stats.samples == 1
+    # C'est le dernier relevé qui fait foi : il est le plus proche du passage réel.
+    assert stats.median_s == 90
+
+
+def test_ponctualite_ecarte_les_valeurs_absurdes(tmp_path):
+    p = _punctuality(tmp_path)
+    base = datetime(2026, 8, 17, 8, 0, tzinfo=PARIS)
+    p.record([("B3", 3, base, 7200)])           # deux heures : artefact, pas un retard
+    p.record([("B3", 3, base + timedelta(minutes=10), 120)])
+    stats = p.stats(refresh=True)["B3"]
+    assert stats.samples == 1
+
+
+def test_marges_mesurees_remplacent_le_defaut(tmp_path):
+    p = _punctuality(tmp_path, min_samples=3, percentile=80)
+    base = datetime(2026, 8, 17, 8, 0, tzinfo=PARIS)
+    # Une ligne en retard chronique, avec une avance isolée.
+    for i, deviation in enumerate([60, 120, 180, 240, -90]):
+        p.record([("B3", 3, base + timedelta(minutes=i), deviation)])
+    late, early = p.margins("B3", 3)
+    assert late >= 120
+    # L'avance ne survient qu'une fois sur cinq : à 80 %, elle est hors de la zone
+    # couverte, et on ne se protège pas d'un cas qu'on a choisi d'ignorer. Relever
+    # `percentile` élargit la couverture des deux côtés à la fois.
+    assert early == 0
+    # Une ligne sans mesure retombe sur la marge de son mode.
+    assert p.margins("INCONNUE", 3) == (150, 0)
+    assert p.margins("INCONNUE", 1) == (30, 0)
+
+
+def test_ligne_souvent_en_avance_produit_une_marge_d_avance(tmp_path):
+    """Un bus qui passe en avance se rate depuis le trottoir : il faut arriver plus tôt."""
+    p = _punctuality(tmp_path, min_samples=3, percentile=80)
+    base = datetime(2026, 8, 17, 8, 0, tzinfo=PARIS)
+    for i, deviation in enumerate([-120, -90, -60, -30, 10]):
+        p.record([("B9", 3, base + timedelta(minutes=i), deviation)])
+    late, early = p.margins("B9", 3)
+    assert early >= 60
+    assert late == 0  # cette ligne n'est jamais en retard : rien à absorber
+
+
+def test_marges_desactivables(tmp_path):
+    p = _punctuality(tmp_path, enabled=False)
+    assert p.margins("B3", 3) == (0, 0)
+
+
+def test_latest_departure_avec_marge_part_plus_tot(db, tmp_path):
+    """Une ligne peu fiable doit faire partir plus tôt, pas plus tard."""
+    from rtmpix.planner import latest_departure
+
+    pattern = Pattern(
+        legs=[Leg("R_METRO", "M9", 0, "S_HOME", "Départ", "S_HUB_M", "Le Hub", route_type=1)],
+        walk_in_s=0,
+        walk_out_s=0,
+    )
+    arrive_by = datetime(2026, 8, 17, 6, 45, tzinfo=PARIS)
+    sans = latest_departure(db, pattern, arrive_by, 0)
+
+    p = _punctuality(tmp_path, min_samples=1, percentile=80)
+    base = datetime(2026, 8, 17, 5, 0, tzinfo=PARIS)
+    for i in range(4):
+        p.record([("M9", 1, base + timedelta(minutes=i), 600)])  # 10 minutes de retard chronique
+    avec = latest_departure(db, pattern, arrive_by, 0, punctuality=p)
+
+    assert sans is not None and avec is not None
+    assert avec.leave_at < sans.leave_at
 
 
 # ------------------------------------------------------------------- affichage

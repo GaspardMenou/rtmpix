@@ -75,13 +75,37 @@ class Journeys:
     destination_radius_m: int = 600   # rayon de recherche d'arrêts autour de la destination
     transfer_radius_m: int = 350      # au-delà, ce n'est plus une correspondance
     min_transfer_s: int = 120         # plancher : descendre, traverser, trouver le quai
-    max_options: int = 3              # itinéraires alternatifs conservés
-    max_origin_stops: int = 20        # arrêts candidats au départ, les plus proches d'abord
-    max_dest_stops: int = 12          # idem à l'arrivée
+    # Deux plafonds distincts : on garde beaucoup de candidats pour que le calcul horaire
+    # puisse les départager à l'instant T, mais on n'en affiche que quelques-uns.
+    max_patterns: int = 8             # itinéraires conservés pour le calcul
+    max_options: int = 3              # itinéraires présentés
+    # Plafonds exprimés en ARRÊTS et non en quais : un arrêt compte souvent deux quais,
+    # et une école peut être desservie par plusieurs arrêts aux lignes différentes.
+    max_origin_stations: int = 8
+    max_dest_stations: int = 8
     arrive_margin_s: int = 300        # être sur place cinq minutes avant le début
     show_window_min: int = 150        # au-delà, le compte à rebours n'a pas sa place à l'écran
     calendar_refresh_s: int = 1800
     destinations: list[Destination] = field(default_factory=list)
+
+
+@dataclass
+class Reliability:
+    """Marges de sécurité, mesurées plutôt que supposées.
+
+    Un bus n'est pas un métro : il subit le trafic, se met en retard, et lui arrive aussi
+    de passer en avance — auquel cas on le rate depuis le trottoir. On observe les écarts
+    entre horaire annoncé et horaire réel, ligne par ligne, et on en déduit la marge.
+    """
+
+    enabled: bool = True
+    percentile: int = 80        # on absorbe le retard rencontré 4 fois sur 5
+    min_samples: int = 20       # en deçà, la mesure ne vaut rien : on garde le défaut du mode
+    retention_days: int = 30
+    # Marges par mode GTFS tant qu'une ligne n'a pas assez d'observations (secondes).
+    default_margin_s: dict[int, int] = field(
+        default_factory=lambda: {0: 60, 1: 30, 2: 120, 3: 150, 4: 120}
+    )
 
 
 @dataclass
@@ -162,6 +186,7 @@ class Config:
     walk: Walk
     transit: Transit
     journeys: Journeys
+    reliability: Reliability
     sources: Sources
     disruptions: Disruptions
     velo: Velo
@@ -187,6 +212,10 @@ class Config:
     @property
     def calibration_path(self) -> Path:
         return self.gtfs.data_dir / "calibration.json"
+
+    @property
+    def punctuality_path(self) -> Path:
+        return self.gtfs.data_dir / "punctuality.sqlite"
 
 
 def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
@@ -243,6 +272,7 @@ def load_config(path: str | Path) -> Config:
         walk=walk,
         transit=Transit(**_section(raw, "transit")),
         journeys=journeys,
+        reliability=Reliability(**_section(raw, "reliability")),
         sources=sources,
         disruptions=Disruptions(**_section(raw, "disruptions")),
         velo=Velo(**_section(raw, "velo")),
