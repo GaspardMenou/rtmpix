@@ -5,13 +5,14 @@
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/GaspardMenou/rtmpix/main/proxmox/install.sh)"
 #
 # Réglable par variables d'environnement :
-#   CTID HOSTNAME DISK CORES RAM BRIDGE STORAGE TEMPLATE_STORAGE PASSWORD REPO BRANCH
+#   CTID CT_HOSTNAME DISK CORES RAM BRIDGE STORAGE TEMPLATE_STORAGE PASSWORD REPO BRANCH
 
 set -Eeuo pipefail
 
 REPO="${REPO:-https://github.com/GaspardMenou/rtmpix}"
 BRANCH="${BRANCH:-main}"
-HOSTNAME="${HOSTNAME:-rtmpix}"
+# HOSTNAME est déjà défini par bash (nom de l'hôte) : on utilise un nom distinct.
+CT_HOSTNAME="${CT_HOSTNAME:-rtmpix}"
 DISK="${DISK:-4}"
 CORES="${CORES:-1}"
 RAM="${RAM:-512}"
@@ -52,7 +53,7 @@ TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-$(pick_storage vztmpl)}"
 
 echo
 echo "  CTID ............ $CTID"
-echo "  Nom ............. $HOSTNAME"
+echo "  Nom ............. $CT_HOSTNAME"
 echo "  Ressources ...... ${CORES} vCPU · ${RAM} Mo · ${DISK} Go"
 echo "  Stockage ........ $STORAGE ${DIM}(templates : $TEMPLATE_STORAGE)${RST}"
 echo "  Réseau .......... $BRIDGE, DHCP"
@@ -81,7 +82,7 @@ ok "Template : $TEMPLATE"
 
 info "Création du conteneur $CTID…"
 CREATE_ARGS=(
-  --hostname "$HOSTNAME"
+  --hostname "$CT_HOSTNAME"
   --cores "$CORES"
   --memory "$RAM"
   --swap 256
@@ -176,7 +177,7 @@ echo "${GRN}┌─────────────────────�
 echo "${GRN}│${RST}  Installation terminée                     ${GRN}│${RST}"
 echo "${GRN}└────────────────────────────────────────────┘${RST}"
 echo
-echo "  Conteneur ....... $CTID ($HOSTNAME) sur ${IP:-?}"
+echo "  Conteneur ....... $CTID ($CT_HOSTNAME) sur ${IP:-?}"
 echo "  Dashboard ....... ${BLU}http://${IP:-<ip>}:8723${RST}"
 echo
 echo "  ${YLW}Il reste deux choses à renseigner avant de démarrer :${RST}"
