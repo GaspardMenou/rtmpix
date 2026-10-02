@@ -85,6 +85,50 @@ class Canvas:
         else:
             self.draw.rectangle(xy, fill=fill, outline=outline, width=width)
 
+    def icon(self, kind: str, x: int, y: int, fill=BLACK):
+        """Pictogrammes 18×18 tracés en pixels francs pour le panneau 1 bit."""
+        d = self.draw
+        if kind == "tram":
+            d.line((x + 5, y + 3, x + 9, y, x + 13, y + 3), fill=fill, width=2)
+            d.rounded_rectangle((x + 1, y + 4, x + 17, y + 14), radius=2, outline=fill, width=2)
+            d.line((x + 6, y + 5, x + 6, y + 11), fill=fill, width=2)
+            d.line((x + 12, y + 5, x + 12, y + 11), fill=fill, width=2)
+            d.ellipse((x + 3, y + 14, x + 6, y + 17), fill=fill)
+            d.ellipse((x + 12, y + 14, x + 15, y + 17), fill=fill)
+        elif kind == "metro":
+            d.ellipse((x + 1, y + 1, x + 17, y + 17), outline=fill, width=2)
+            d.line((x + 4, y + 13, x + 4, y + 6, x + 9, y + 10,
+                    x + 14, y + 6, x + 14, y + 13), fill=fill, width=2)
+        elif kind == "bus":
+            d.rounded_rectangle((x + 2, y + 2, x + 16, y + 14), radius=2, outline=fill, width=2)
+            d.line((x + 3, y + 8, x + 15, y + 8), fill=fill, width=2)
+            d.point((x + 5, y + 11), fill=fill)
+            d.point((x + 13, y + 11), fill=fill)
+            d.line((x + 4, y + 15, x + 4, y + 17), fill=fill, width=2)
+            d.line((x + 14, y + 15, x + 14, y + 17), fill=fill, width=2)
+        elif kind == "walk":
+            d.ellipse((x + 7, y, x + 11, y + 4), fill=fill)
+            d.line((x + 9, y + 5, x + 7, y + 11), fill=fill, width=2)
+            d.line((x + 7, y + 8, x + 2, y + 11), fill=fill, width=2)
+            d.line((x + 8, y + 8, x + 14, y + 10), fill=fill, width=2)
+            d.line((x + 7, y + 11, x + 3, y + 17), fill=fill, width=2)
+            d.line((x + 7, y + 11, x + 14, y + 17), fill=fill, width=2)
+        elif kind == "bike":
+            d.ellipse((x, y + 9, x + 7, y + 16), outline=fill, width=2)
+            d.ellipse((x + 11, y + 9, x + 18, y + 16), outline=fill, width=2)
+            d.line((x + 3, y + 13, x + 8, y + 6, x + 14, y + 13, x + 3, y + 13), fill=fill, width=2)
+            d.line((x + 8, y + 6, x + 12, y + 6), fill=fill, width=2)
+            d.line((x + 13, y + 5, x + 16, y + 5), fill=fill, width=2)
+        elif kind == "calendar":
+            d.rounded_rectangle((x + 1, y + 2, x + 17, y + 17), radius=2, outline=fill, width=2)
+            d.line((x + 2, y + 7, x + 16, y + 7), fill=fill, width=2)
+            d.line((x + 5, y, x + 5, y + 5), fill=fill, width=2)
+            d.line((x + 13, y, x + 13, y + 5), fill=fill, width=2)
+            d.rectangle((x + 5, y + 10, x + 8, y + 13), fill=fill)
+        elif kind == "clock":
+            d.ellipse((x + 1, y + 1, x + 17, y + 17), outline=fill, width=2)
+            d.line((x + 9, y + 4, x + 9, y + 9, x + 13, y + 11), fill=fill, width=2)
+
 
 DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
@@ -95,6 +139,21 @@ def _french_date(moment: datetime) -> str:
     return f"{DAYS[moment.weekday()]} {moment.day} {MONTHS[moment.month - 1]}"
 
 
+def _next_catchable(board: dict) -> str:
+    """Premier passage atteignable depuis l'appartement, marche et quai compris."""
+    return next((n["at"] for n in board.get("next", [])
+                 if n.get("in_s", -1) >= board.get("lead_budget_s", 0)), "—")
+
+
+def _vehicle_icon(item: dict) -> str:
+    mode = item.get("mode")
+    if mode == 0 or (mode is None and str(item.get("line", "")).startswith("T")):
+        return "tram"
+    if mode == 1 or (mode is None and str(item.get("line", "")).startswith("M")):
+        return "metro"
+    return "bus"
+
+
 def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
     """Compose le tableau de bord complet à partir d'un instantané du service."""
     c = Canvas(width, height)
@@ -103,7 +162,8 @@ def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
     right_col_x = int(width * 0.60)
 
     # ------------------------------------------------------------------ en-tête
-    c.text((margin, 18), _french_date(now), size=22, bold=True)
+    c.icon("calendar", margin, 21)
+    c.text((margin + 26, 18), _french_date(now), size=22, bold=True)
     source = state.get("source", "?")
     label = {"rbgl": "temps réel", "spoti": "temps réel", "gtfs": "horaires théoriques"}.get(
         source, "hors ligne"
@@ -126,7 +186,8 @@ def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
             c.text((margin, y), f"pour {deadline['course']} à {deadline['at']}", size=18)
             y += 34
         else:
-            c.text((margin, y), "PARS À", size=17, bold=True)
+            c.icon("clock", margin, y + 1)
+            c.text((margin + 25, y), "PARS À", size=17, bold=True)
             leave = option.get("leave_at", "—")
             c.text((margin, y + 18), leave, size=86, bold=True)
             y += 118
@@ -144,10 +205,11 @@ def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
         # Détail de l'itinéraire, tronçon par tronçon.
         y += 10
         for leg in option.get("legs") or []:
-            badge_w = max(34, int(c.width_of(leg["line"], size=15, bold=True)) + 16)
+            badge_w = max(56, int(c.width_of(leg["line"], size=15, bold=True)) + 37)
             c.box((margin, y, margin + badge_w, y + 24), fill=BLACK, outline=BLACK, radius=5)
-            c.text((margin + badge_w / 2, y + 12), leg["line"], size=15, bold=True,
-                   fill=WHITE, anchor="mm")
+            c.icon(_vehicle_icon(leg), margin + 5, y + 3, fill=WHITE)
+            c.text((margin + badge_w - 6, y + 12), leg["line"], size=15, bold=True,
+                   fill=WHITE, anchor="rm")
             c.text((margin + badge_w + 12, y + 3),
                    f"{leg['dep']}  {leg['from']}", size=15,
                    max_w=right_col_x - margin - badge_w - 40)
@@ -165,18 +227,23 @@ def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
                 f"{o['label']} pars {o['leave_at']}" for o in others
             ), size=13, max_w=right_col_x - margin - 20)
             y += 22
-        # Et si on part tout de suite, sans attendre l'échéance.
-        fastest = (active.get("fastest_now") or [])[:1]
-        if fastest:
-            f = fastest[0]
-            c.text((margin, y + 4),
-                   f"maintenant : {f['label']} → {f['arrive_at']} ({f['duration_s'] // 60}′)",
-                   size=13, max_w=right_col_x - margin - 20)
-
     elif journeys:
-        c.text((margin, y), "Aucun cours à venir", size=30, bold=True)
-        y += 44
-        upcoming = (journeys[0].get("upcoming") or [])[:3]
+        journey = journeys[0]
+        c.text((margin, y), journey.get("name", "Destination"), size=30, bold=True,
+               max_w=right_col_x - margin - 20)
+        y += 52
+        fastest = (journey.get("fastest_now") or [])[:1]
+        if fastest:
+            plan = fastest[0]
+            c.text((margin, y), "PROCHAIN TRAJET", size=13, bold=True)
+            c.text((margin, y + 25), plan["label"], size=30, bold=True)
+            c.text((margin, y + 70),
+                   f"Départ {plan['leave_at']} · arrivée {plan['arrive_at']}", size=17)
+            y += 112
+        else:
+            c.text((margin, y), "Aucun trajet disponible", size=18)
+            y += 35
+        upcoming = (journey.get("upcoming") or [])[:3]
         for course in upcoming:
             c.text((margin, y), f"{course['start']} · {course['summary'][:34]}", size=14)
             y += 22
@@ -189,32 +256,55 @@ def render(state: dict, width: int = 800, height: int = 480) -> Image.Image:
     y = 72
     c.line((x - 20, 60), (x - 20, height - 74), fill=BLACK)
     c.text((x, y), "PROCHAINS PASSAGES", size=13, bold=True)
-    y += 26
+    y += 30
+    col_w = (width - margin - x - 8) // 2
+    boards = state.get("boards") or []
+    trams = [b for b in boards if b.get("line", "").startswith("T")]
+    shown = (trams + [b for b in boards if b not in trams])[:4]
+    for i, board in enumerate(shown):
+        bx = x + (i % 2) * (col_w + 8)
+        by = y + (i // 2) * 84
+        c.box((bx, by, bx + col_w, by + 76), outline=BLACK, radius=4)
+        badge_w = max(48, int(c.width_of(board["line"], size=13, bold=True)) + 29)
+        c.box((bx + 7, by + 7, bx + 7 + badge_w, by + 29), fill=BLACK,
+              outline=BLACK, radius=4)
+        c.icon(_vehicle_icon(board), bx + 10, by + 9, fill=WHITE)
+        c.text((bx + 7 + badge_w - 5, by + 18), board["line"], size=13,
+               bold=True, fill=WHITE, anchor="rm")
+        if not board.get("realtime"):
+            c.text((bx + col_w - 8, by + 10), "théo.", size=11, anchor="ra")
+        c.text((bx + 8, by + 31), board.get("terminus", ""), size=12,
+               max_w=col_w - 16)
+        # Une seule heure absolue par ligne et direction.
+        next_time = _next_catchable(board)
+        c.text((bx + 8, by + 49), next_time, size=22, bold=True)
 
-    for board in (state.get("boards") or [])[:4]:
-        badge_w = max(32, int(c.width_of(board["line"], size=14, bold=True)) + 14)
-        c.box((x, y, x + badge_w, y + 22), fill=BLACK, outline=BLACK, radius=4)
-        c.text((x + badge_w / 2, y + 11), board["line"], size=14, bold=True,
-               fill=WHITE, anchor="mm")
-        c.text((x + badge_w + 10, y + 3), board.get("terminus", ""), size=13,
-               max_w=width - x - badge_w - margin - 10)
-        # Heures absolues : sur e-ink, un « dans 4 min » serait faux avant même d'être lu.
-        times = "  ".join(n["at"] for n in (board.get("next") or [])[:4])
-        theo = "" if board.get("realtime") else "  (théorique)"
-        c.text((x + badge_w + 10, y + 24), times + theo, size=15, bold=True,
-               max_w=width - x - badge_w - margin - 10)
-        y += 52
+    y += 178
+    other_boards = [b for b in boards if b not in shown]
+    if other_boards:
+        c.text((x, y), "AUTRES DÉPARTS", size=12, bold=True)
+        y += 20
+        for board in other_boards[:3]:
+            next_time = _next_catchable(board)
+            c.icon(_vehicle_icon(board), x, y)
+            c.text((x + 22, y), f"{board['line']} → {board.get('terminus', '')}  {next_time}",
+                   size=13, max_w=width - x - margin - 22)
+            y += 19
+
+    if shown and y < height - 105:
+        first = shown[0]
+        c.icon("walk", x, y)
+        c.text((x + 22, y), f"À pied : {first.get('station', '')} · "
+               f"{first.get('walk_s', 0) // 60}′{first.get('walk_s', 0) % 60:02d}",
+               size=13, max_w=width - x - margin - 22)
+        y += 22
 
     velo = state.get("velo") or []
-    if velo and y < height - 130:
-        y += 6
-        c.text((x, y), "LEVÉLO", size=13, bold=True)
-        y += 24
-        for station in velo[:2]:
-            c.text((x, y), station["name"], size=13, max_w=width - x - margin)
-            c.text((x, y + 18), f"{station['bikes']} vélos · {station['docks']} bornes",
-                   size=16, bold=True)
-            y += 46
+    if velo and y < height - 80:
+        station = velo[0]
+        c.icon("bike", x, y)
+        c.text((x + 22, y), f"LeVélo {station['name']} : {station['bikes']} vélos",
+               size=13, max_w=width - x - margin - 22)
 
     # ----------------------------------------------------------- pied : alertes
     disruptions = state.get("disruptions") or []

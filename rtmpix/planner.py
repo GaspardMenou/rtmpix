@@ -20,9 +20,10 @@ quai. On la détecte donc géométriquement.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
+from .config import DEFAULT_ACCESS_S
 from .geo import haversine_m, walk_seconds
 from .realtime import PARIS, active_services
 
@@ -59,6 +60,7 @@ class Pattern:
     # jusqu'à l'arrêt de reprise. C'est cette part que l'on règle au chronomètre ; le
     # total, lui, dépend de l'arrêt choisi et se recalcule.
     transfer_fixed_s: list[int] = field(default_factory=list)
+    access_in_s: int = 0
 
     @property
     def label(self) -> str:
@@ -70,10 +72,12 @@ class Pattern:
 
     @property
     def total_s(self) -> int:
-        return self.walk_in_s + self.ride_s + self.walk_out_s
+        return self.walk_in_s + self.access_in_s + self.ride_s + self.walk_out_s
 
     def describe(self) -> str:
         parts = [f"{self.walk_in_s // 60}′ à pied"]
+        if self.access_in_s:
+            parts.append(f"{self.access_in_s // 60}′{self.access_in_s % 60:02d} jusqu'au quai")
         for i, leg in enumerate(self.legs):
             parts.append(f"{leg.line} {leg.from_name} → {leg.to_name}")
             if i < len(self.transfers_s):
@@ -199,6 +203,12 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
             haversine_m(slat, slon, to_lat, to_lon), cfg.walk.speed_mps, cfg.walk.detour_factor
         )
 
+    def access_to(stop_id: str, route_type: int) -> int:
+        name = stops[stop_id][0]
+        return int(calibration.access.get(
+            name, cfg.transit.access_s.get(name, DEFAULT_ACCESS_S.get(route_type, 30))
+        ))
+
     patterns: list[Pattern] = []
 
     # ------------------------------------------------------------------ directs
@@ -234,6 +244,7 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
                 legs=[leg],
                 walk_in_s=walk_to(row["o"], origin["lat"], origin["lon"]),
                 walk_out_s=walk_from(row["d"], destination["lat"], destination["lon"]),
+                access_in_s=access_to(row["o"], row["route_type"]),
             )
         )
 
@@ -332,6 +343,7 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
                         walk_out_s=walk_from(second["d"], destination["lat"], destination["lon"]),
                         transfers_s=[transfer],
                         transfer_fixed_s=[fixed],
+                        access_in_s=access_to(first["o"], r1["route_type"]),
                     )
                 )
 
@@ -343,7 +355,74 @@ def discover(db, cfg, router, origin, destination, calibration) -> list[Pattern]
         return p.total_s + wait
 
     patterns.sort(key=score)
-    kept = _dedupe(patterns, cfg.journeys.max_patterns)
+    base = _dedupe(patterns, cfg.journeys.max_patterns)
+
+    # Un métro pris près du domicile peut rejoindre le premier tronçon d'un trajet
+    # déjà trouvé. Exemple : M2 Joliette → Saint-Charles, puis M1 → La Rose et B3.
+    # On ne prolonge que les bons trajets à une correspondance, pour éviter une
+    # exploration combinatoire de tout le réseau.
+    metro_routes = {
+        row["route_id"]: row
+        for row in db.execute(
+            "SELECT route_id, short_name, color, route_type FROM routes WHERE route_type = 1"
+        )
+    }
+    metro_access = [row for row in reachable if row["route_id"] in metro_routes]
+    expanded = list(base)
+    for pattern in base:
+        if len(pattern.legs) != 2:
+            continue
+        main = pattern.legs[0]
+        route_stops = db.execute(
+            "SELECT seq, stop_id FROM route_stops WHERE route_id = ? AND direction_id = ? "
+            "ORDER BY seq", (main.route_id, main.direction_id)
+        ).fetchall()
+        start = next((r["seq"] for r in route_stops if r["stop_id"] == main.from_stop), None)
+        end = next((r["seq"] for r in route_stops if r["stop_id"] == main.to_stop), None)
+        if start is None or end is None:
+            continue
+        for access in metro_access:
+            if access["route_id"] == main.route_id:
+                continue
+            x_name, xlat, xlon = stops[access["x"]]
+            for mid in route_stops:
+                if not start <= mid["seq"] < end:
+                    continue
+                mid_name, mlat, mlon = stops[mid["stop_id"]]
+                distance = haversine_m(xlat, xlon, mlat, mlon)
+                if distance > cfg.journeys.transfer_radius_m:
+                    continue
+                first_s, first_runs = _leg_stats(
+                    db, access["route_id"], access["direction_id"], access["o"], access["x"]
+                )
+                main_s, main_runs = _leg_stats(
+                    db, main.route_id, main.direction_id, mid["stop_id"], main.to_stop
+                )
+                if not first_runs or not main_runs:
+                    continue
+                route = metro_routes[access["route_id"]]
+                first_leg = Leg(
+                    access["route_id"], route["short_name"] or "?", access["direction_id"],
+                    access["o"], stops[access["o"]][0], access["x"], x_name,
+                    route["color"], typical_s=first_s, daily_runs=first_runs,
+                    route_type=route["route_type"],
+                )
+                fixed = int(calibration.transfer.get(x_name, cfg.journeys.min_transfer_s))
+                expanded.append(Pattern(
+                    legs=[first_leg, replace(main, from_stop=mid["stop_id"],
+                                             from_name=mid_name, typical_s=main_s,
+                                             daily_runs=main_runs), pattern.legs[1]],
+                    walk_in_s=walk_to(access["o"], origin["lat"], origin["lon"]),
+                    walk_out_s=pattern.walk_out_s,
+                    transfers_s=[fixed + walk_seconds(
+                        distance, cfg.walk.speed_mps, cfg.walk.detour_factor
+                    ), *pattern.transfers_s],
+                    transfer_fixed_s=[fixed, *pattern.transfer_fixed_s],
+                    access_in_s=access_to(access["o"], route["route_type"]),
+                ))
+
+    expanded.sort(key=score)
+    kept = _dedupe(expanded, cfg.journeys.max_patterns)
 
     # Seulement maintenant : la marche réelle par les rues, pour les itinéraires retenus.
     for p in kept:
@@ -502,7 +581,9 @@ def latest_departure(
 
     board_at = timed[0][0]
     first_early = _margins(punctuality, pattern.legs[0])[1]
-    leave_at = board_at - timedelta(seconds=pattern.walk_in_s + overhead_s + first_early)
+    leave_at = board_at - timedelta(
+        seconds=pattern.walk_in_s + pattern.access_in_s + overhead_s + first_early
+    )
     arrive_at = timed[-1][1] + timedelta(seconds=pattern.walk_out_s)
     return Plan(pattern, leave_at, board_at, arrive_at, timed)
 
@@ -517,7 +598,7 @@ def earliest_arrival(
     correspondances. L'heure d'arrivée annoncée reste celle de l'horaire : la majorer du
     retard donnerait une estimation systématiquement pessimiste.
     """
-    cursor = leave_at + timedelta(seconds=overhead_s + pattern.walk_in_s)
+    cursor = leave_at + timedelta(seconds=overhead_s + pattern.walk_in_s + pattern.access_in_s)
     timed: list[tuple[datetime, datetime]] = []
 
     for index, leg in enumerate(pattern.legs):

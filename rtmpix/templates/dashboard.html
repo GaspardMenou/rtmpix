@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rtmpix — réglages</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23009fe3'/><text x='16' y='23' font-size='19' font-family='monospace' font-weight='bold' text-anchor='middle' fill='%23fff'>r</text></svg>">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
 <style>
   :root {
     --bg: #0b0e13;
@@ -28,11 +28,12 @@
   }
   .wrap { max-width: 1080px; margin: 0 auto; }
   header {
-    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--line);
   }
   h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
   h1 span { color: var(--accent); }
+  .brand-icon { width: 32px; height: 32px; object-fit: contain; }
   h2 {
     margin: 32px 0 12px; font-size: 12px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
@@ -57,7 +58,7 @@
   .screen .bar { position: absolute; left: 0; bottom: 0; height: 4px; }
   .screen.blink { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0.35; } }
-  .screen-label { font-size: 11px; color: var(--muted); margin-top: 5px; font-family: var(--mono); }
+  .screen-label { font-size: 14px; color: var(--muted); margin-top: 5px; font-family: var(--mono); }
 
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
@@ -65,8 +66,8 @@
   .card .line { font-family: var(--mono); font-weight: 700; font-size: 18px; }
   .card .terminus { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card .lead { font-family: var(--mono); font-size: 34px; font-weight: 700; margin: 6px 0 2px; }
-  .card .breakdown { font-size: 12px; color: var(--muted); font-family: var(--mono); }
-  .card .times { margin-top: 8px; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .card .breakdown { font-size: 14px; color: var(--muted); font-family: var(--mono); }
+  .card .times { margin-top: 8px; font-size: 14px; color: var(--muted); font-family: var(--mono); }
   .theo { color: var(--soon); }
 
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -82,7 +83,7 @@
   }
   input[type=number]:focus { outline: none; border-color: var(--accent); }
   input[type=range] { width: 200px; accent-color: var(--accent); }
-  .src { font-size: 11px; color: var(--muted); }
+  .src { font-size: 14px; color: var(--muted); }
   button {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
     border-radius: 7px; padding: 7px 13px; font-size: 13px; cursor: pointer;
@@ -126,13 +127,13 @@
   }
   .route {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 8px 10px; border-radius: 8px; font-size: 13px;
+    padding: 8px 10px; border-radius: 8px; font-size: 14px;
   }
   .route:nth-child(odd) { background: var(--panel-2); }
   .route.best { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
   .route .chain { display: flex; align-items: center; gap: 6px; }
   .route .arrow { color: var(--muted); }
-  .route .path { color: var(--muted); font-size: 12px; flex: 1; min-width: 200px; }
+  .route .path { color: var(--muted); font-size: 14px; flex: 1; min-width: 200px; }
   .route .dur { font-family: var(--mono); margin-left: auto; white-space: nowrap; }
   .route .dur b { color: var(--text); }
   .badge-sm {
@@ -143,7 +144,7 @@
   /* Ajout d'une destination. */
   .add-form { background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 16px 18px; }
   .add-form .fields { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-  .add-form label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .add-form label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 5px; }
   .add-form input[type=text] {
     background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
     border-radius: 7px; padding: 8px 11px; font-size: 14px; min-width: 200px;
@@ -167,12 +168,20 @@
   .tag.bad { color: var(--now); border-color: color-mix(in srgb, var(--now) 40%, var(--line)); }
   .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; }
   .del:hover { color: var(--now); }
+  .chooser { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .pick-list { max-height: 280px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px; }
+  .pick-list label { display: flex; gap: 8px; align-items: center; padding: 5px 7px; font-size: 14px; cursor: pointer; }
+  .pick-list label:hover { background: var(--panel-2); }
+  .pick-list small { margin-left: auto; color: var(--muted); font-size: 14px; }
+  .pick-list label[hidden] { display: none; }
+  #pick-search { width: min(100%, 380px); background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 8px 11px; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
   <header>
+    <img class="brand-icon" src="{{ url_for('static', filename='logo.png') }}" alt="" aria-hidden="true">
     <h1>rtm<span>pix</span></h1>
     <span class="pill" id="home">{{ home.label }}</span>
     <div class="status">
@@ -212,6 +221,15 @@
 
   <h2>Départs</h2>
   <div class="cards" id="boards"></div>
+
+  <h2>Choisir les arrêts et les sens</h2>
+  <p class="hint">Les arrêts du rayon de 900 m. Choisis les stations interrogées, puis les directions à afficher. Par exemple, le 55 vers Roucas Blanc peut rester coché sans le 55 vers Joliette.</p>
+  <input id="pick-search" type="search" placeholder="Chercher un arrêt, une ligne ou une direction">
+  <div class="chooser row">
+    <div><strong>Stations</strong><div class="pick-list" id="pick-stations"></div></div>
+    <div><strong>Lignes et directions</strong><div class="pick-list" id="pick-lines"></div></div>
+  </div>
+  <div class="row"><button id="pick-save">Enregistrer la sélection</button><span id="pick-msg" class="src"></span></div>
 
   <h2>Temps porte-à-quai</h2>
   <p class="hint">
@@ -260,6 +278,34 @@
 const $ = (id) => document.getElementById(id);
 let state = null;
 let fetchedAt = 0;
+let catalogDirty = false;
+let lastSelectionKey = "";
+const esc = (value) => String(value).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"})[c]);
+const fold = (value) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function renderCatalog() {
+  const key = JSON.stringify(state.selection) + JSON.stringify(state.stations.map(s => s.name));
+  if (catalogDirty || key === lastSelectionKey) return;
+  lastSelectionKey = key;
+  const selectedStations = new Set(state.selection.stations ?? state.stations.map(s => s.name));
+  const allLines = [...new Set(state.catalog.flatMap(s => s.lines))].sort();
+  const selectedLines = new Set(state.selection.lines ?? allLines);
+  $("pick-stations").innerHTML = state.catalog.map(s =>
+    `<label data-search="${esc(fold(s.name + " " + s.lines.join(" ")))}"><input type="checkbox" data-pick-station="${encodeURIComponent(s.name)}" ${selectedStations.has(s.name) ? "checked" : ""}><span>${esc(s.name)}</span><small>${s.distance_m} m · ${s.modes.map(m => ({0:"tram",1:"métro",3:"bus"})[m] || "autre").join("/")}</small></label>`
+  ).join("");
+  $("pick-lines").innerHTML = allLines.map(line =>
+    `<label data-search="${esc(fold(line))}"><input type="checkbox" data-pick-line="${encodeURIComponent(line)}" ${selectedLines.has(line) ? "checked" : ""}><span>${esc(line.replace(">", " → "))}</span></label>`
+  ).join("");
+  filterCatalog();
+}
+
+function filterCatalog() {
+  const q = fold($("pick-search").value.trim());
+  document.querySelectorAll(".pick-list label").forEach(label => {
+    label.hidden = !!q && !label.dataset.search.includes(q);
+  });
+}
 
 const fmtLead = (s) => {
   if (s === null || s === undefined) return "--";
@@ -304,13 +350,13 @@ function render() {
         ${j.editable ? `<button class="del" data-remove="${j.name}" title="Retirer cette destination">✕</button>` : ""}
       </div>`;
 
-    // Le catalogue des itinéraires : indépendant de l'heure, il dit ce qui est possible.
-    // Les horaires du jour viennent d'`options` et de `fastest_now`, plus bas.
-    const timing = {};
-    (j.options || []).forEach(o => { timing[o.label] = timing[o.label] || {}; timing[o.label].leave = o.leave_at; });
-    (j.fastest_now || []).forEach(o => { timing[o.label] = timing[o.label] || {}; timing[o.label].arrive = o.arrive_at; timing[o.label].dur = o.duration_s; });
+    // Un départ et une arrivée doivent provenir du même calcul horaire.
+    const timing = Object.fromEntries((j.options || []).map(o =>
+      [o.label, { leave: o.leave_at, arrive: o.arrive_at }]
+    ));
 
-    const routes = (j.patterns || []).map((p, i) => {
+    const bestLabel = opt?.label || j.fastest_now?.[0]?.label;
+    const routes = (j.patterns || []).map(p => {
       const chain = p.legs.map(l =>
         `<span class="badge-sm" style="background:#${l.color || "888888"}" title="${l.mode}">${l.line}</span>`
       ).join('<span class="arrow">›</span>');
@@ -322,15 +368,15 @@ function render() {
         t.leave ? `pars ${t.leave}` : null,
         t.arrive ? `arrivée ${t.arrive}` : null,
       ].filter(Boolean).join(" · ");
-      return `<div class="route ${i === 0 ? "best" : ""}">
+      return `<div class="route ${p.label === bestLabel ? "best" : ""}">
           <span class="chain">${chain}</span>
-          <span class="path">${fmtMin(p.walk_in_s)} à pied · ${path} · ${fmtMin(p.walk_out_s)} à pied</span>
-          <span class="dur"><b>${Math.round(p.total_s / 60)}′</b>${extra ? " · " + extra : ""}</span>
+          <span class="path">${fmtMin(p.walk_in_s)} à pied${p.access_in_s ? ` + ${fmtMin(p.access_in_s)} jusqu'au quai` : ""} · ${path} · ${fmtMin(p.walk_out_s)} à pied</span>
+          <span class="dur"><b>≈${Math.round(p.total_s / 60)}′ hors attente</b>${extra ? " · " + extra : ""}</span>
         </div>`;
     }).join("");
 
     const routesBlock = routes
-      ? `<div class="routes"><h3>Itinéraires possibles (${j.patterns.length})</h3>${routes}</div>`
+      ? `<div class="routes"><h3>Itinéraires du réseau (${j.patterns.length}) · horaires selon le jour</h3>${routes}</div>`
       : "";
 
     // Indépendant de toute échéance : le plus rapide si on part tout de suite.
@@ -374,7 +420,8 @@ function render() {
         <div class="sub">
           ${opt.label}<br>
           départ ${opt.board_at} · arrivée ${opt.arrive_at}<br>
-          marche ${fmtMin(opt.walk_in_s)} + ${fmtMin(opt.walk_out_s)}
+          marche ${fmtMin(opt.walk_in_s)} + ${fmtMin(opt.walk_out_s)} · quai ${fmtMin(opt.access_in_s)}<br>
+          descente ${fmtMin(state.door_delay_s)} + marge ${state.margin_s}s
         </div>
       </div>
       <div class="legs">${legs}</div>
@@ -429,7 +476,7 @@ function render() {
       <div class="lead" style="color:${lead === null ? "var(--muted)" : urgency(lead)}">
         ${lead === null ? "--" : fmtLead(lead)}${b.realtime ? "" : '<span class="theo" style="font-size:16px"> théo.</span>'}
       </div>
-      <div class="breakdown">${b.station} · marche ${fmtMin(b.walk_s)} + quai ${b.access_s}s + prépa ${state.overhead_s}s</div>
+      <div class="breakdown">${b.station} · marche ${fmtMin(b.walk_s)} + quai ${b.access_s}s + descente ${fmtMin(state.door_delay_s)} + marge ${state.margin_s}s</div>
       <div class="times">passages : ${times || "—"}</div>
     </div>`;
   }).join("") || '<p class="empty">Rien à afficher.</p>';
@@ -454,6 +501,7 @@ function render() {
     </tr>`).join("");
 
   $("pace").value = state.pace_factor;
+  renderCatalog();
   $("pace-val").textContent = "×" + Number(state.pace_factor).toFixed(2);
 
   // Vélos
@@ -503,12 +551,36 @@ async function post(url, body) {
 
 document.addEventListener("change", (e) => {
   const el = e.target;
+  if (el.matches("[data-pick-station], [data-pick-line]")) {
+    catalogDirty = true;
+    $("pick-msg").textContent = "Modifications non enregistrées";
+    return;
+  }
   if (el.dataset && el.dataset.station) {
     post("/api/calibration", {
       station: el.dataset.station,
       [el.dataset.field]: el.value === "" ? null : Number(el.value),
     });
   }
+});
+$("pick-search").addEventListener("input", filterCatalog);
+$("pick-save").addEventListener("click", async () => {
+  const stations = [...document.querySelectorAll("[data-pick-station]:checked")]
+    .map(el => decodeURIComponent(el.dataset.pickStation));
+  const lines = [...document.querySelectorAll("[data-pick-line]:checked")]
+    .map(el => decodeURIComponent(el.dataset.pickLine));
+  const button = $("pick-save");
+  button.disabled = true;
+  $("pick-msg").textContent = "Enregistrement…";
+  try {
+    const resp = await fetch("/api/selection", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({stations, lines})});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Échec de l'enregistrement");
+    state = data; fetchedAt = Date.now(); catalogDirty = false; lastSelectionKey = "";
+    render();
+    $("pick-msg").textContent = "Sélection enregistrée";
+  } catch (error) { $("pick-msg").textContent = String(error); }
+  button.disabled = false;
 });
 $("pace").addEventListener("change", (e) => post("/api/calibration", { pace_factor: Number(e.target.value) }));
 $("pace").addEventListener("input", (e) => { $("pace-val").textContent = "×" + Number(e.target.value).toFixed(2); });

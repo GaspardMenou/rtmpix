@@ -1,0 +1,18 @@
+name: rtmpix
+version: "0.2.0"
+slug: rtmpix
+description: Départs RTM, trajets et image e-ink
+arch:
+  - aarch64
+startup: application
+boot: auto
+init: false
+ports:
+  8723/tcp: 8723
+ports_description:
+  8723/tcp: Tableau de bord et image e-ink
+webui: http://[HOST]:[PORT:8723]/
+map:
+  - type: addon_config
+    read_only: false
+backup: cold

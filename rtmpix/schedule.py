@@ -65,7 +65,9 @@ class ScheduleClient:
                 self.cache_path.write_bytes(resp.content)
                 return resp.content
             except (requests.RequestException, ValueError) as exc:
-                log.warning("Emploi du temps injoignable (%s), on garde le cache.", exc)
+                # requests inclut l'URL complète dans ses erreurs ; l'URL iCal est secrète.
+                log.warning("Emploi du temps injoignable (%s), on garde le cache.",
+                            type(exc).__name__)
         else:
             path = Path(source).expanduser()
             if path.exists():

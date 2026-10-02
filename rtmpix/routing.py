@@ -60,7 +60,7 @@ class WalkRouter:
 
     def leg(self, from_lat, from_lon, to_lat, to_lon, refresh: bool = False) -> Leg:
         key = _key(from_lat, from_lon, to_lat, to_lon)
-        if not refresh and key in self.cache:
+        if not refresh and key in self.cache and self.cache[key].get("engine") == self.engine:
             entry = self.cache[key]
             return Leg(entry["distance_m"], entry["duration_s"], entry["engine"])
 
@@ -73,17 +73,13 @@ class WalkRouter:
         return leg
 
     def _query(self, from_lat, from_lon, to_lat, to_lon) -> Leg:
-        engines = [self.engine] + [e for e in ("valhalla", "osrm") if e != self.engine]
-        for engine in engines:
-            if engine == "haversine":
-                break
-            try:
-                if engine == "valhalla":
-                    return self._valhalla(from_lat, from_lon, to_lat, to_lon)
-                if engine == "osrm":
-                    return self._osrm(from_lat, from_lon, to_lat, to_lon)
-            except Exception as exc:
-                log.warning("Routeur %s indisponible (%s), repli.", engine, exc)
+        try:
+            if self.engine == "valhalla":
+                return self._valhalla(from_lat, from_lon, to_lat, to_lon)
+            if self.engine == "osrm":
+                return self._osrm(from_lat, from_lon, to_lat, to_lon)
+        except Exception as exc:
+            log.warning("Routeur %s indisponible (%s), repli local.", self.engine, exc)
 
         distance = haversine_m(from_lat, from_lon, to_lat, to_lon)
         return Leg(

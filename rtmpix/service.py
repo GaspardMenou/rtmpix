@@ -6,10 +6,12 @@ accèdent tous les deux, sous verrou. L'horloge, elle, ne fait qu'afficher.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from hashlib import sha256
 
 from . import destinations as destinations_store
 from . import gtfs, planner, render
@@ -79,6 +81,12 @@ class Service:
         self.last_push_ok: bool | None = None
         self.journeys: list[JourneyState] = []
 
+        self.catalog = stations_mod.nearby_catalog(self.conn, cfg)
+        try:
+            self.selection = json.loads(cfg.selection_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.selection = {}
+
         self.reload_stations()
         self.setup_journeys()
 
@@ -87,7 +95,8 @@ class Service:
     def reload_stations(self, refresh_routing: bool = False) -> None:
         with self.lock:
             self.stations = stations_mod.find_nearby(
-                self.conn, self.cfg, self.router, self.calibration, refresh=refresh_routing
+                self.conn, self.cfg, self.router, self.calibration, refresh=refresh_routing,
+                names=set(self.selection["stations"]) if "stations" in self.selection else None,
             )
             log.info(
                 "Stations retenues : %s",
@@ -97,6 +106,26 @@ class Service:
                 )
                 or "aucune",
             )
+
+    def set_selection(self, stations: list[str], lines: list[str]) -> str:
+        """Enregistre les arrêts et sens affichés dans le panneau de départs."""
+        if not isinstance(stations, list) or not isinstance(lines, list):
+            return "Sélection invalide."
+        known_stations = {s["name"] for s in self.catalog}
+        known_lines = {line for s in self.catalog for line in s["lines"]}
+        if (any(not isinstance(s, str) or s not in known_stations for s in stations)
+                or any(not isinstance(line, str) or line not in known_lines for line in lines)):
+            return "Une station ou une direction n'est plus dans le rayon. Recharge la page."
+        with self.lock:
+            self.selection = {"stations": list(dict.fromkeys(stations)),
+                              "lines": list(dict.fromkeys(lines))}
+            self.cfg.selection_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cfg.selection_path.write_text(
+                json.dumps(self.selection, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            self.reload_stations()
+        self.refresh_departures()
+        return ""
 
     def set_access(self, station_name: str, seconds: int | None) -> None:
         """Règle le temps entrée -> quai d'une station (None efface la calibration)."""
@@ -147,7 +176,8 @@ class Service:
     def _make_schedule(self, destination) -> ScheduleClient | None:
         if not destination.calendar:
             return None
-        cache = self.cfg.gtfs.data_dir / f"ical-{render.slug(destination.name, 12)}.ics"
+        key = sha256(destination.calendar.encode()).hexdigest()[:16]
+        cache = self.cfg.gtfs.data_dir / f"ical-{key}.ics"
         return ScheduleClient(
             destination.calendar, cache,
             timeout_s=self.cfg.sources.timeout_s,
@@ -259,6 +289,14 @@ class Service:
         for journey in self.journeys:
             if journey.schedule is not None:
                 journey.schedule.refresh()
+        self.refresh_journeys()
+
+    def ordered_journeys(self) -> list[JourneyState]:
+        """Le prochain cours en premier, les destinations sans cours ensuite."""
+        return sorted(self.journeys, key=lambda j: (
+            j.course is None,
+            j.course.start if j.course else datetime.max.replace(tzinfo=PARIS),
+        ))
 
     def refresh_journeys(self) -> None:
         """Recalcule, pour chaque destination, la dernière minute possible pour partir."""
@@ -318,7 +356,9 @@ class Service:
         departures = self.realtime.fetch(self.stations)
         self._record_punctuality(departures)
         with self.lock:
-            self.boards = build_boards(departures, self.stations, self.cfg, now)
+            self.boards = build_boards(
+                departures, self.stations, self.cfg, now, self.selection.get("lines")
+            )
             self.last_departures_at = now
 
     def _record_punctuality(self, departures) -> None:
@@ -362,10 +402,10 @@ class Service:
         apps: dict[str, dict] = {}
         with self.lock:
             # L'échéance passe en tête : c'est l'information la plus contraignante.
-            for journey in self.journeys:
+            for journey in self.ordered_journeys():
                 built = render.deadline_app(journey, now, self.cfg.journeys.show_window_min)
                 if built is not None:
-                    apps[built[0]] = {**built[1], "pos": 0}
+                    apps[built[0]] = {**built[1], "pos": len(apps)}
             for board in self.boards:
                 suffix, payload = render.board_app(board, now)
                 apps[suffix] = payload
@@ -412,6 +452,8 @@ class Service:
                 },
                 "pace_factor": self.calibration.pace_factor,
                 "overhead_s": self.cfg.walk.overhead_s,
+                "door_delay_s": self.cfg.walk.door_delay_s,
+                "margin_s": self.cfg.walk.margin_s,
                 "home": asdict(self.cfg.home),
                 "stations": [
                     {
@@ -429,9 +471,12 @@ class Service:
                     }
                     for s in self.stations
                 ],
+                "catalog": self.catalog,
+                "selection": self.selection,
                 "boards": [
                     {
                         **render.board_screen(board, now),
+                        "mode": self.route_types.get(board.line),
                         "terminus": board.terminus,
                         "station": board.station,
                         "walk_s": board.walk_s,
@@ -468,7 +513,7 @@ class Service:
                     }
                     for d in self.disruptions
                 ],
-                "journeys": [self._journey_snapshot(j, now) for j in self.journeys],
+                "journeys": [self._journey_snapshot(j, now) for j in self.ordered_journeys()],
                 "punctuality": [
                     {
                         "line": s.line,
@@ -527,9 +572,13 @@ class Service:
                     "arrive_at": plan.arrive_at.strftime("%H:%M"),
                     "duration_s": int((plan.arrive_at - plan.leave_at).total_seconds()),
                     "walk_s": plan.pattern.walk_in_s + plan.pattern.walk_out_s,
+                    "walk_in_s": plan.pattern.walk_in_s,
+                    "walk_out_s": plan.pattern.walk_out_s,
+                    "access_in_s": plan.pattern.access_in_s,
                     "legs": [
                         {
                             "line": leg.line,
+                            "mode": leg.route_type,
                             "color": leg.color,
                             "from": leg.from_name,
                             "to": leg.to_name,
@@ -551,11 +600,13 @@ class Service:
                     "arrive_at": plan.arrive_at.strftime("%H:%M"),
                     "walk_in_s": plan.pattern.walk_in_s,
                     "walk_out_s": plan.pattern.walk_out_s,
+                    "access_in_s": plan.pattern.access_in_s,
                     "transfers_s": plan.pattern.transfers_s,
                     "transfer_fixed_s": plan.pattern.transfer_fixed_s,
                     "legs": [
                         {
                             "line": leg.line,
+                            "mode": leg.route_type,
                             "color": leg.color,
                             "from": leg.from_name,
                             "to": leg.to_name,
@@ -577,6 +628,7 @@ class Service:
                     "total_s": p.total_s,
                     "walk_in_s": p.walk_in_s,
                     "walk_out_s": p.walk_out_s,
+                    "access_in_s": p.access_in_s,
                     "transfers_s": p.transfers_s,
                     "legs": [
                         {

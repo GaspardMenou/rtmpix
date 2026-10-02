@@ -57,7 +57,8 @@ def _matches_filter(dep: Departure, patterns: list[str]) -> bool:
     return False
 
 
-def build_boards(departures: list[Departure], stations, cfg, now: datetime) -> list[Board]:
+def build_boards(departures: list[Departure], stations, cfg, now: datetime,
+                 selected_lines: list[str] | None = None) -> list[Board]:
     """Regroupe les passages par (ligne, terminus) et trie par urgence de départ."""
     by_name = {s.name: s for s in stations}
     horizon_s = cfg.transit.horizon_min * 60
@@ -65,6 +66,8 @@ def build_boards(departures: list[Departure], stations, cfg, now: datetime) -> l
     grouped: dict[tuple[str, str, str], Board] = {}
     for dep in departures:
         if not dep.line or not _matches_filter(dep, cfg.transit.lines):
+            continue
+        if selected_lines is not None and (not selected_lines or not _matches_filter(dep, selected_lines)):
             continue
         # Une rame dont le terminus est la station où l'on se trouve y arrive, elle n'en
         # part pas : « T1 → Noailles » affiché à Noailles n'emmène nulle part.
@@ -119,7 +122,7 @@ def build_boards(departures: list[Departure], stations, cfg, now: datetime) -> l
         return (0, catchable[0]) if catchable else (1, board.lead_s)
 
     boards.sort(key=sort_key)
-    return boards[: cfg.transit.max_lines]
+    return boards[: cfg.transit.max_lines] if selected_lines is None else boards
 
 
 def _margin(board: Board, now: datetime) -> int:

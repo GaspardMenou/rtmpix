@@ -1,4 +1,4 @@
-# rtmpix
+<h1><img src="rtmpix/static/logo.png" alt="" width="48"> rtmpix</h1>
 
 Les départs RTM et les vélos LeVélo de Marseille sur une horloge pixel **Ulanzi TC001**
 (firmware [AWTRIX 3](https://github.com/Blueforcer/awtrix3)).
@@ -6,6 +6,8 @@ Les départs RTM et les vélos LeVélo de Marseille sur une horloge pixel **Ulan
 L'écran ne dit pas « le métro passe dans 4 minutes » — inutile quand la station est à sept
 minutes à pied et deux minutes de couloirs. Il dit **combien de temps il te reste avant de
 devoir partir** :
+
+![Un trajet en tram à Marseille, du domicile à l'écran e-ink](docs/assets/commute-banner.png)
 
 ```
 ┌──────────────────────────────┐
@@ -184,6 +186,33 @@ RTM, et à Baptiste RUELLO-BABALONI pour l'API mobilité.
 
 ## Installation
 
+### Home Assistant OS sur Raspberry Pi 5
+
+Une application locale HA OS est fournie dans `homeassistant/rtmpix`. Depuis ce dépôt sur le
+Mac, assemble le dossier à copier (le code courant est inclus, sans configuration privée) :
+
+```bash
+python3 scripts/package_homeassistant.py
+```
+
+Avec l'application **Samba share** de Home Assistant, copie le dossier
+`dist/homeassistant/rtmpix` dans le partage `addons`. Dans HA : **Paramètres → Applications →
+Installer une application → ⋮ → Rechercher des mises à jour**, puis installe **rtmpix** dans
+« Applications locales ». Le premier démarrage peut prendre quelques minutes pour installer
+les dépendances et compiler le GTFS.
+
+Avant de démarrer l'application, copie le `config.yaml` du Mac et le dossier `data` dans
+`addon_configs/local_rtmpix` sur le Pi. Le chemin doit être
+`addon_configs/local_rtmpix/config.yaml` et la configuration doit conserver
+`gtfs.data_dir: ./data`, `web.host: 0.0.0.0` et `web.port: 8723`. Arrête le service du Mac
+avant de copier `data`, pour préserver la base SQLite et éviter deux collecteurs simultanés.
+L'image e-ink sera ensuite sur `http://IP_DU_PI:8723/eink.png`.
+
+Le tableau de bord n'a pas d'authentification : garde le port 8723 sur le réseau local.
+Les fichiers `addon_configs/local_rtmpix` sont persistants et inclus dans les sauvegardes
+de l'application HA. [Guide officiel des applications locales](https://developers.home-assistant.io/docs/apps/tutorial/)
+et [configuration des dossiers persistants](https://developers.home-assistant.io/docs/apps/configuration/).
+
 ### Proxmox, en une commande
 
 Depuis le shell de l'hôte Proxmox, au choix :
@@ -297,6 +326,13 @@ T2 › M1    …                                                                
 Les destinations ajoutées ici vivent dans `data/destinations.json` et se suppriment depuis
 le dashboard ; celles de `config.yaml` s'y modifient, le dashboard ne réécrit jamais ton
 YAML.
+
+Pour deux colocataires dans la même école, ajouter deux trajets vers cette école avec
+des noms distincts (par exemple « Gaspard » et « Coloc ») et chacun son lien iCal.
+Le dashboard et les écrans donnent la priorité au prochain cours le plus tôt, puis
+passent au suivant une fois ce cours commencé. Les agendas sont retéléchargés au
+démarrage et toutes les 30 minutes par défaut (`journeys.calendar_refresh_s`), avec
+repli sur leur cache respectif si le serveur de l'école est inaccessible.
 
 Les valeurs mesurées vont dans `data/calibration.json` et priment sur `config.yaml`, qui
 n'est jamais réécrit. Le dashboard n'a **pas d'authentification** : à garder sur le réseau

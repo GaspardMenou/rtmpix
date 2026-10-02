@@ -222,6 +222,10 @@ class Config:
         return self.gtfs.data_dir / "destinations.json"
 
     @property
+    def selection_path(self) -> Path:
+        return self.gtfs.data_dir / "selection.json"
+
+    @property
     def geocode_cache_path(self) -> Path:
         return self.gtfs.data_dir / "geocode-cache.json"
 
@@ -272,8 +276,6 @@ def load_config(path: str | Path) -> Config:
             raise SystemExit("Chaque journeys.destinations doit avoir au moins name, lat et lon.")
         destinations.append(Destination(**item))
     journeys = Journeys(**journeys_raw, destinations=destinations)
-    if journeys.enabled and not destinations:
-        raise SystemExit("journeys.enabled vaut true mais aucune destination n'est définie.")
 
     return Config(
         home=Home(**home_raw),

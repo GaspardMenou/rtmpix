@@ -15,6 +15,39 @@ from rtmpix.planner import Leg, Pattern, latest_departure
 from rtmpix.realtime import PARIS, Departure, _hhmm_to_datetime, active_services
 from rtmpix.schedule import _as_datetime
 
+
+def test_priorite_des_deux_agendas(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    from rtmpix.service import JourneyState, Service
+
+    service = Service.__new__(Service)
+    service.lock = threading.RLock()
+    service.cfg = SimpleNamespace(journeys=SimpleNamespace(show_window_min=150))
+    now = datetime(2026, 10, 5, 7, tzinfo=PARIS)
+    later = JourneyState(SimpleNamespace(name="Gaspard"),
+                         course=SimpleNamespace(start=now + timedelta(hours=2)))
+    earlier = JourneyState(SimpleNamespace(name="Coloc"),
+                           course=SimpleNamespace(start=now + timedelta(hours=1)))
+    no_course = JourneyState(SimpleNamespace(name="Sans cours"))
+    service.journeys = [later, no_course, earlier]
+    service.boards = service.velo_stations = service.disruptions = []
+    monkeypatch.setattr(render, "deadline_app", lambda j, *_: (
+        (j.destination.name, {}) if j.course else None
+    ))
+    assert service.ordered_journeys() == [earlier, later, no_course]
+    apps = service.build_apps(now)
+    assert list(apps) == ["Coloc", "Gaspard"]
+    assert [app["pos"] for app in apps.values()] == [0, 1]
+    later.course.start = now + timedelta(minutes=30)
+    assert service.ordered_journeys()[0] is later
+    earlier.course = None
+    assert service.ordered_journeys()[0] is later
+    later.course.start = now + timedelta(days=1)
+    earlier.course = SimpleNamespace(start=now + timedelta(hours=3))
+    assert service.ordered_journeys()[0] is earlier
+
 # ------------------------------------------------------------------ horaires GTFS
 
 def test_parse_gtfs_time_apres_minuit():
@@ -59,6 +92,7 @@ def test_latest_departure_avec_correspondance(db):
         walk_in_s=300,
         walk_out_s=120,
         transfers_s=[180],
+        access_in_s=90,
     )
     arrive_by = datetime(2026, 8, 17, 8, 0, tzinfo=PARIS)
     plan = latest_departure(db, pattern, arrive_by, overhead_s=90)
@@ -73,7 +107,61 @@ def test_latest_departure_avec_correspondance(db):
     bus_departure = plan.legs[1][0]
     assert (bus_departure - metro_arrival).total_seconds() >= 180
     # Et l'heure de sortie tient compte de la marche et de la préparation.
-    assert plan.leave_at == plan.board_at - timedelta(seconds=300 + 90)
+    assert plan.leave_at == plan.board_at - timedelta(seconds=300 + 90 + 90)
+
+
+def test_decouverte_metro_puis_metro_puis_bus(db, db_path):
+    """M2 proche du domicile rejoint M1, qui rejoint le bus final."""
+    import sqlite3
+    from types import SimpleNamespace
+
+    from rtmpix.calibration import Calibration
+    from rtmpix.config import Journeys, Transit, Walk
+    from rtmpix.planner import discover
+    from rtmpix.routing import Leg as WalkLeg
+
+    conn = sqlite3.connect(db_path)
+    conn.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?)", [
+        ("S_M2", "M2 départ", 43.3002, 5.4002, None, None),
+        ("S_CHANGE", "Correspondance", 43.3001, 5.4001, None, None),
+    ])
+    conn.execute("INSERT INTO routes VALUES (?,?,?,?,?)", ("R_M2", "M2", "", 1, "E30613"))
+    conn.executemany("INSERT INTO route_stops VALUES (?,?,?,?)", [
+        ("R_M2", 0, 0, "S_M2"), ("R_M2", 0, 1, "S_CHANGE"),
+    ])
+    conn.execute("INSERT INTO trips VALUES (?,?,?,?,?,?)", ("T_LINK", "R_M2", "SVC_ALL", "", 0, 1))
+    conn.executemany("INSERT INTO stop_times VALUES (?,?,?,?,?)", [
+        ("T_LINK", "S_M2", 21600, 21600, 0),
+        ("T_LINK", "S_CHANGE", 21780, 21780, 1),
+    ])
+    conn.commit()
+    conn.close()
+
+    class Router:
+        def leg(self, *args):
+            return WalkLeg(100, 90, "test")
+
+        def save(self):
+            pass
+
+    cfg = SimpleNamespace(transit=Transit(radius_m=500),
+                          journeys=Journeys(max_patterns=12), walk=Walk())
+    patterns = discover(db, cfg, Router(),
+                        {"lat": 43.3000, "lon": 5.4000},
+                        {"lat": 43.3400, "lon": 5.4400},
+                        Calibration(transfer={"Correspondance": 180}))
+    via_m2 = next(p for p in patterns if p.label == "M2 › M9 › B9")
+    assert via_m2.transfers_s[0] >= 180
+    assert via_m2.access_in_s == 90
+
+
+def test_eink_choisit_le_premier_depart_atteignable():
+    from rtmpix.eink import _next_catchable
+
+    board = {"lead_budget_s": 600, "next": [
+        {"at": "19:50", "in_s": 120}, {"at": "20:00", "in_s": 720},
+    ]}
+    assert _next_catchable(board) == "20:00"
 
 
 def test_latest_departure_trouve_la_course_apres_minuit(db):
@@ -370,3 +458,23 @@ def test_buffer_eink_a_la_bonne_taille():
     image = eink.render({"boards": [], "velo": [], "disruptions": [], "journeys": []}, 800, 480)
     assert image.size == (800, 480)
     assert len(eink.to_packed_1bpp(image)) == 800 * 480 // 8
+
+
+def test_eink_affiche_trajet_sans_agenda(monkeypatch):
+    from rtmpix import eink
+
+    drawn = []
+    original = eink.Canvas.text
+
+    def record(self, xy, content, **kwargs):
+        drawn.append(str(content))
+        return original(self, xy, content, **kwargs)
+
+    monkeypatch.setattr(eink.Canvas, "text", record)
+    eink.render({"journeys": [{
+        "name": "Centrale Méditerranée",
+        "fastest_now": [{"label": "M2 › B3", "leave_at": "07:20", "arrive_at": "08:00"}],
+    }]})
+    assert "Centrale Méditerranée" in drawn
+    assert "M2 › B3" in drawn
+    assert "Départ 07:20 · arrivée 08:00" in drawn

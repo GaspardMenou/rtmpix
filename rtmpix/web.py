@@ -27,6 +27,14 @@ def create_app(service) -> Flask:
     def state():
         return jsonify(service.snapshot())
 
+    @app.post("/api/selection")
+    def selection():
+        payload = request.get_json(silent=True) or {}
+        error = service.set_selection(payload.get("stations"), payload.get("lines"))
+        if error:
+            return jsonify({"error": error}), 400
+        return jsonify(service.snapshot())
+
     @app.post("/api/calibration")
     def calibration():
         payload = request.get_json(silent=True) or {}

@@ -1,10 +1,12 @@
 # Configuration locale : contient l'adresse du domicile et l'IP de l'horloge.
 config.yaml
+!homeassistant/rtmpix/config.yaml
 
 # Données générées : base GTFS, cache de routage, calibrations mesurées.
 data/
 
 .venv/
+dist/
 __pycache__/
 *.py[cod]
 .DS_Store

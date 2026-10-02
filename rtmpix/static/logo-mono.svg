@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Logo rtmpix monochrome">
+  <rect x="7" y="13" width="78" height="78" rx="14" fill="#000"/>
+  <g fill="#fff">
+    <rect x="21" y="27" width="20" height="20" rx="3"/>
+    <rect x="51" y="27" width="20" height="20" rx="3"/>
+    <rect x="21" y="57" width="20" height="20" rx="3"/>
+    <rect x="51" y="57" width="20" height="20" rx="3"/>
+  </g>
+  <path d="M84 51h15v17" fill="none" stroke="#000" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="97" cy="95" r="29" fill="#000"/>
+  <path d="M97 78v18l12 8" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
