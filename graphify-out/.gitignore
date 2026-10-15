@@ -1,0 +1,6 @@
+# Caches et réglages propres à cette machine.
+cache/
+.graphify_*
+!.graphify_labels.json
+.needs_update
+cost.json

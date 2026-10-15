@@ -1,0 +1,3 @@
+# Configuration locale des outils, hors architecture du projet.
+.claude/
+.impeccable/
